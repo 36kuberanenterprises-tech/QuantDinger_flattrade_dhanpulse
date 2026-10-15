@@ -24,6 +24,9 @@ from app.services.live_trading.gate import GateStockClient, GateUsdtFuturesClien
 from app.services.live_trading.htx import HtxClient
 from app.services.live_trading.leg_context import credential_id_from_exchange_config
 from app.services.live_trading.okx import OkxClient
+from app.services.live_trading.position_ownership import (
+    refresh_account_ownership_from_snapshot,
+)
 from app.services.live_trading.records import (
     _delete_position,
     _fetch_position,
@@ -562,6 +565,7 @@ class PendingOrderPositionSyncMixin:
 
                 cache_key = position_sync_cache_key(sync_user_id, exchange_id, market_type, exchange_config)
                 cached_snap = get_position_sync_snapshot(cache_key)
+                snapshot_started_at = 0.0
                 exch_size: Dict[str, Dict[str, float]] = {}
                 exch_entry_price: Dict[str, Dict[str, float]] = {}
                 exch_inst_id: Dict[str, Dict[str, str]] = {}
@@ -570,6 +574,7 @@ class PendingOrderPositionSyncMixin:
                 if cached_snap is not None:
                     exch_size, exch_entry_price, exch_inst_id = cached_snap
                 else:
+                    snapshot_started_at = time.time()
                     if is_exchange_sync_backoff(cache_key):
                         logger.warning(
                             "[PositionSync] Strategy %s skipped: %s sync backoff active (key=%s)",
@@ -1035,6 +1040,25 @@ class PendingOrderPositionSyncMixin:
                         market_type=str(market_type or "swap"),
                         legs=legs,
                     )
+                    if snapshot_started_at > 0:
+                        refresh_account_ownership_from_snapshot(
+                            user_id=int(sync_user_id),
+                            credential_id=cred_id,
+                            exchange_id=str(exchange_id or ""),
+                            market_type=str(market_type or "swap"),
+                            account_rows=[
+                                {
+                                    "symbol": leg.symbol,
+                                    "side": leg.side,
+                                    "size": leg.size,
+                                    "entry_price": leg.entry_price,
+                                    "mark_price": leg.mark_price,
+                                    "inst_id": leg.inst_id,
+                                }
+                                for leg in legs
+                            ],
+                            snapshot_started_at=snapshot_started_at,
+                        )
                 except Exception as l1_err:
                     logger.warning("[PositionSync] L1 account sync failed key=%s: %s", cache_key, l1_err)
 

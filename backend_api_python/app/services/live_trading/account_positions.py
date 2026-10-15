@@ -47,6 +47,10 @@ def sync_account_positions(
     active_keys: List[tuple] = []
     with get_db_connection() as db:
         cur = db.cursor()
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"account-position-sync:{uid}:{cred}:{mt}",),
+        )
         for leg in legs or []:
             sym = normalize_strategy_symbol(leg.symbol) or str(leg.symbol or "").strip()
             side = str(leg.side or "").strip().lower()
