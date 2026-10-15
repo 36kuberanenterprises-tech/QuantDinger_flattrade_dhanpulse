@@ -100,6 +100,7 @@ from app.services.pending_orders.sent_order_recovery import (
     is_final_fill, normalize_live_order_status,
     tracked_fill_baseline,
 )
+from app.services.pending_orders.live_sync_recovery import restore_live_sent_order_after_sync_error
 from app.services.pending_orders.order_quantities import (
     exchange_quantity_snapshot,
     reconciled_queue_status,
@@ -725,11 +726,13 @@ class PendingOrderWorker(
             try:
                 self._sync_one_live_sent_order(row)
             except Exception as exc:
+                restore_live_sent_order_after_sync_error(row, exc)
                 logger.warning(
                     "Live fill sync failed: pending_id=%s exchange=%s err=%s",
                     row.get("id"),
                     row.get("exchange_id"),
                     exc,
+                    exc_info=True,
                 )
 
     def _should_rest_reconcile(self, row: Dict[str, Any]) -> bool:
@@ -810,7 +813,8 @@ class PendingOrderWorker(
                            ) AS fee_reconciliation_needed
                     FROM pending_orders
                     WHERE (
-                            status = 'sent'
+                            (status = 'sent' AND (COALESCE(dispatch_note, '') <> 'live_fill_sync:retry_error'
+                             OR updated_at < NOW() - (%s * INTERVAL '1 second')))
                             OR (
                                 status IN ('filled', 'cancelled') AND COALESCE(filled, 0) >
                                 (SELECT COALESCE(SUM(t.amount), 0) FROM qd_strategy_trades t WHERE t.pending_order_id = pending_orders.id)
@@ -842,7 +846,7 @@ class PendingOrderWorker(
                              sent_at ASC NULLS FIRST, id ASC
                     LIMIT %s
                     """,
-                    (int(self._fee_sync_retry_sec), int(limit)),
+                    (stale_sec, int(self._fee_sync_retry_sec), int(limit)),
                 )
                 rows = cur.fetchall() or []
                 cur.close()
@@ -864,7 +868,8 @@ class PendingOrderWorker(
                     updated_at = NOW()
                 WHERE id = %s
                   AND (
-                        status = 'sent'
+                        (status = 'sent' AND (COALESCE(dispatch_note, '') <> 'live_fill_sync:retry_error'
+                         OR updated_at < NOW() - (%s * INTERVAL '1 second')))
                         OR (
                             status IN ('filled', 'cancelled') AND COALESCE(filled, 0) >
                             (SELECT COALESCE(SUM(t.amount), 0) FROM qd_strategy_trades t WHERE t.pending_order_id = pending_orders.id)
@@ -893,7 +898,7 @@ class PendingOrderWorker(
                       )
                 RETURNING *
                 """,
-                (int(order_id), int(self._fee_sync_retry_sec)),
+                (int(order_id), int(self._stale_processing_sec), int(self._fee_sync_retry_sec)),
             )
             row = cur.fetchone()
             db.commit()
@@ -1045,6 +1050,10 @@ class PendingOrderWorker(
             if '_other_fees' in combined:
                 aggregate_filled = combined['cumulative_quantity']
                 aggregate_avg = combined['cumulative_average_price']
+            if delta <= ALPACA_FILL_DELTA_EPSILON:
+                delta = 0.0
+                aggregate_filled = previous_filled
+                aggregate_avg = previous_avg
             signal_type = str(payload.get("signal_type") or row.get("signal_type") or "")
             commission_quote = fee_breakdown_to_quote(
                 client,
@@ -1270,6 +1279,7 @@ class PendingOrderWorker(
                 UPDATE pending_orders
                 SET status = %s,
                     dispatch_note = %s,
+                    last_error = '',
                     filled = %s,
                     avg_price = %s,
                     fee_status = CASE
