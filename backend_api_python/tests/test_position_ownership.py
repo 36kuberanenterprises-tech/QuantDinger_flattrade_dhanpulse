@@ -19,12 +19,16 @@ from app.services.live_trading.position_ownership import (
 
 
 class _RecordingCursor:
-    def __init__(self):
+    def __init__(self, *, lock_acquired=True):
         self.calls = []
         self.rowcount = 1
+        self.lock_acquired = lock_acquired
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
+
+    def fetchone(self):
+        return {"acquired": self.lock_acquired}
 
     def close(self):
         return None
@@ -58,7 +62,7 @@ def test_account_position_sync_serializes_each_credential_bucket(monkeypatch):
     db = _RecordingDb(cursor)
     monkeypatch.setattr(account_positions, "get_db_connection", lambda: _RecordingContext(db))
 
-    account_positions.sync_account_positions(
+    synced = account_positions.sync_account_positions(
         user_id=7,
         credential_id=33,
         exchange_id="gate",
@@ -66,10 +70,29 @@ def test_account_position_sync_serializes_each_credential_bucket(monkeypatch):
         legs=[],
     )
 
-    assert "pg_advisory_xact_lock" in cursor.calls[0][0]
+    assert synced is True
+    assert "pg_try_advisory_xact_lock" in cursor.calls[0][0]
     assert cursor.calls[0][1] == ("account-position-sync:7:33:swap",)
     assert "DELETE FROM qd_account_positions" in cursor.calls[1][0]
     assert db.committed is True
+
+
+def test_account_position_sync_skips_instead_of_waiting_for_busy_bucket(monkeypatch):
+    cursor = _RecordingCursor(lock_acquired=False)
+    db = _RecordingDb(cursor)
+    monkeypatch.setattr(account_positions, "get_db_connection", lambda: _RecordingContext(db))
+
+    synced = account_positions.sync_account_positions(
+        user_id=7,
+        credential_id=33,
+        exchange_id="gate",
+        market_type="swap",
+        legs=[],
+    )
+
+    assert synced is False
+    assert len(cursor.calls) == 1
+    assert db.committed is False
 
 
 def test_fresh_snapshot_clears_only_older_recorded_drift(monkeypatch):
