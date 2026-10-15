@@ -822,6 +822,24 @@ class PendingOrderPositionSyncMixin:
                                         qty_base = qty_base * qm
                                 except Exception:
                                     pass
+                                exch_size.setdefault(
+                                    hb_sym, {"long": 0.0, "short": 0.0}
+                                )[side] = float(qty_base)
+                                exch_inst_id.setdefault(
+                                    hb_sym, {"long": "", "short": ""}
+                                )[side] = contract
+                                try:
+                                    ep = float(
+                                        p.get("entry_price")
+                                        or p.get("open_price")
+                                        or 0.0
+                                    )
+                                    if ep > 0:
+                                        exch_entry_price.setdefault(
+                                            hb_sym, {"long": 0.0, "short": 0.0}
+                                        )[side] = ep
+                                except Exception:
+                                    pass
 
                     elif isinstance(client, HtxClient) and market_type == "swap":
                         resp = client.get_positions()
@@ -880,13 +898,6 @@ class PendingOrderPositionSyncMixin:
                                         exch_entry_price.setdefault(
                                             hb_sym, {"long": 0.0, "short": 0.0}
                                         )[side] = ep
-                                except Exception:
-                                    pass
-                                exch_size.setdefault(hb_sym, {"long": 0.0, "short": 0.0})[side] = float(qty_base)
-                                try:
-                                    ep = float(p.get("entry_price") or p.get("open_price") or 0.0)
-                                    if ep > 0:
-                                        exch_entry_price.setdefault(hb_sym, {"long": 0.0, "short": 0.0})[side] = ep
                                 except Exception:
                                     pass
 
