@@ -120,7 +120,8 @@ def test_reconcile_defers_without_exchange_snapshot(monkeypatch):
             "market_type": "swap",
         },
     )
-    monkeypatch.setattr(mod, "resolve_okx_external_close", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_leg_owner_count", lambda **_kwargs: 1)
+    monkeypatch.setattr(mod, "resolve_exchange_external_close", lambda *a, **k: None)
     monkeypatch.setattr(
         mod,
         "record_external_flat_close",
@@ -167,3 +168,69 @@ def test_resolve_falls_back_to_fills_history(monkeypatch):
     assert abs(float(snap["price"]) - 78657.8) < 1e-9
     assert snap["source"] == "fills_history"
     assert snap["close_reason"] == EXCHANGE_NATIVE_CLOSE
+
+
+def test_reconcile_records_each_exact_fill_component(monkeypatch):
+    monkeypatch.setattr(mod, "trade_side_net_qty", lambda *a, **k: 1.0)
+    monkeypatch.setattr(
+        mod,
+        "_last_open_trade",
+        lambda *a, **k: {
+            "price": 100.0,
+            "created_at": datetime(2026, 10, 15, 1, 0, 0),
+            "credential_id": 5,
+            "inst_id": "BTC-USDT-SWAP",
+            "market_type": "swap",
+        },
+    )
+    monkeypatch.setattr(mod, "_leg_owner_count", lambda **_kwargs: 1)
+    closed_at = datetime(2026, 10, 15, 2, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        mod,
+        "resolve_exchange_external_close",
+        lambda *a, **k: {
+            "components": [
+                {"amount": 0.4, "price": 105.0, "fee": 0.04, "fee_ccy": "USDT", "exchange_fill_id": "f1", "closed_at": closed_at},
+                {"amount": 0.6, "price": 106.0, "fee": 0.06, "fee_ccy": "USDT", "exchange_fill_id": "f2", "closed_at": closed_at},
+            ]
+        },
+    )
+    recorded = []
+    monkeypatch.setattr(
+        mod,
+        "record_external_flat_close",
+        lambda **kwargs: recorded.append(kwargs) or len(recorded),
+    )
+
+    trade_id = mod.reconcile_external_flat_closes(
+        strategy_id=32,
+        symbol="BTC/USDT",
+        side="long",
+        client=object(),
+    )
+
+    assert trade_id == 2
+    assert [row["amount"] for row in recorded] == [0.4, 0.6]
+    assert [row["exchange_fill_id"] for row in recorded] == ["f1", "f2"]
+
+
+def test_reconcile_defers_multi_owner_account_leg(monkeypatch):
+    monkeypatch.setattr(mod, "trade_side_net_qty", lambda *a, **k: 1.0)
+    monkeypatch.setattr(
+        mod,
+        "_last_open_trade",
+        lambda *a, **k: {"price": 100.0, "credential_id": 5, "market_type": "swap"},
+    )
+    monkeypatch.setattr(mod, "_leg_owner_count", lambda **_kwargs: 2)
+    monkeypatch.setattr(
+        mod,
+        "resolve_exchange_external_close",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("ambiguous leg must not query fills")),
+    )
+
+    assert mod.reconcile_external_flat_closes(
+        strategy_id=32,
+        symbol="BTC/USDT",
+        side="long",
+        client=object(),
+    ) == 0

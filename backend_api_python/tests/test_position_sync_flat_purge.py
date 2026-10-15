@@ -7,6 +7,7 @@ from app.services import pending_order_position_sync as sync_mod
 def _purge_enabled(monkeypatch):
     """The purge ships disabled; the cases below exercise it explicitly."""
     monkeypatch.setenv("POSITION_SYNC_PURGE_FLAT_LEDGER", "true")
+    monkeypatch.setattr(sync_mod, "_record_flat_leg_ownership_state", lambda **_kwargs: None)
 
 
 def _no_recent_open_fills(monkeypatch):
@@ -164,6 +165,7 @@ def test_purge_flat_strategy_positions_keeps_leg_within_grace_window(monkeypatch
 def test_purge_flat_strategy_positions_keeps_leg_without_attributed_close(monkeypatch):
     """Non-OKX venues cannot produce a close snapshot, so their legs must survive."""
     deleted = []
+    blocked = []
     _no_recent_open_fills(monkeypatch)
     _attributed_close(monkeypatch, trade_id=0)
     monkeypatch.setattr(
@@ -176,6 +178,11 @@ def test_purge_flat_strategy_positions_keeps_leg_without_attributed_close(monkey
         "_local_strategy_position_legs",
         lambda strategy_id, allowed_symbols: [("BTC/USDT", "long")],
     )
+    monkeypatch.setattr(
+        sync_mod,
+        "_record_flat_leg_ownership_state",
+        lambda **kwargs: blocked.append(kwargs),
+    )
 
     count = sync_mod._purge_flat_strategy_positions_from_exchange(
         strategy_id=12,
@@ -185,6 +192,8 @@ def test_purge_flat_strategy_positions_keeps_leg_without_attributed_close(monkey
 
     assert count == 0
     assert deleted == []
+    assert blocked[0]["strategy_id"] == 12
+    assert blocked[0]["symbol"] == "BTC/USDT"
 
 
 def test_purge_flat_strategy_positions_skips_cached_snapshot(monkeypatch):
@@ -247,8 +256,8 @@ def test_purge_flat_strategy_positions_drops_already_reconciled_leg(monkeypatch)
     assert deleted == [(14, "BTC/USDT", "long")]
 
 
-def test_purge_flat_strategy_positions_is_off_unless_enabled(monkeypatch):
-    """Shipping default: a flat snapshot alone must not delete a leg."""
+def test_purge_flat_strategy_positions_is_on_by_default(monkeypatch):
+    """Exact attributed closes heal stale legs without extra deployment flags."""
     deleted = []
     monkeypatch.delenv("POSITION_SYNC_PURGE_FLAT_LEDGER", raising=False)
     _no_recent_open_fills(monkeypatch)
@@ -270,5 +279,5 @@ def test_purge_flat_strategy_positions_is_off_unless_enabled(monkeypatch):
         exch_size={},
     )
 
-    assert count == 0
-    assert deleted == []
+    assert count == 1
+    assert deleted == [(15, "BTC/USDT", "long")]

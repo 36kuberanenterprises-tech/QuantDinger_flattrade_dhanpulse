@@ -21,10 +21,12 @@ from app.services.live_trading.bitget import BitgetMixClient
 from app.services.live_trading.bybit import BybitClient
 from app.services.live_trading.factory import create_client
 from app.services.live_trading.gate import GateStockClient, GateUsdtFuturesClient
+from app.services.live_trading.htx import HtxClient
 from app.services.live_trading.leg_context import credential_id_from_exchange_config
 from app.services.live_trading.okx import OkxClient
 from app.services.live_trading.records import (
     _delete_position,
+    _fetch_position,
     lookup_exchange_side_qty,
     normalize_strategy_symbol,
     strategy_allowed_symbols,
@@ -52,6 +54,53 @@ logger = get_logger(__name__)
 IBKRClient = None
 AlpacaClient = None
 _POSITION_SYNC_FD_BACKOFF_UNTIL = 0.0
+
+
+def _record_flat_leg_ownership_state(
+    *,
+    strategy_id: int,
+    strategy_config: Dict[str, Any],
+    symbol: str,
+    side: str,
+    strategy_qty: Optional[float] = None,
+) -> None:
+    """Persist an account-shortfall block while an external flat close is unresolved."""
+    row = _fetch_position(int(strategy_id), str(symbol), str(side))
+    qty = float(row.get("size") or 0.0) if strategy_qty is None else float(strategy_qty or 0.0)
+    credential_id = int(row.get("credential_id") or 0)
+    if credential_id <= 0:
+        return
+    market_type = str(row.get("market_type") or "swap").strip().lower()
+    exchange_config = (
+        strategy_config.get("exchange_config")
+        if isinstance(strategy_config.get("exchange_config"), dict)
+        else {}
+    )
+    exchange_id = str(
+        exchange_config.get("exchange_id")
+        or exchange_config.get("exchangeId")
+        or strategy_config.get("exchange_id")
+        or ""
+    ).strip().lower()
+    from app.services.live_trading.position_ownership import (
+        evaluate_and_record_ownership,
+        ownership_log_message,
+    )
+    from app.utils.strategy_runtime_logs import append_strategy_log
+
+    snapshot = evaluate_and_record_ownership(
+        user_id=int(row.get("user_id") or strategy_config.get("user_id") or 1),
+        credential_id=credential_id,
+        exchange_id=exchange_id,
+        market_type=market_type,
+        symbol=str(symbol),
+        side=str(side),
+        account_qty=0.0,
+        strategy_qty=max(0.0, qty),
+        inst_id=str(row.get("inst_id") or ""),
+    )
+    if not snapshot.allowed and snapshot.should_log:
+        append_strategy_log(int(strategy_id), "error", ownership_log_message(snapshot))
 
 
 def _local_strategy_position_legs(
@@ -164,7 +213,7 @@ def _purge_flat_strategy_positions_from_exchange(
     just-executed open/add fill.
     """
     try:
-        enabled = str(os.getenv("POSITION_SYNC_PURGE_FLAT_LEDGER", "false")).strip().lower()
+        enabled = str(os.getenv("POSITION_SYNC_PURGE_FLAT_LEDGER", "true")).strip().lower()
     except Exception:
         enabled = "false"
     if enabled in {"0", "false", "no", "off"}:
@@ -215,6 +264,16 @@ def _purge_flat_strategy_positions_from_exchange(
                 symbol,
                 side,
             )
+            try:
+                _record_flat_leg_ownership_state(
+                    strategy_id=sid,
+                    strategy_config=strategy_config,
+                    symbol=symbol,
+                    side=side,
+                    strategy_qty=0.0,
+                )
+            except Exception:
+                pass
             _delete_position(sid, symbol, side)
             deleted += 1
             continue
@@ -254,7 +313,32 @@ def _purge_flat_strategy_positions_from_exchange(
                 symbol,
                 side,
             )
+            try:
+                _record_flat_leg_ownership_state(
+                    strategy_id=sid,
+                    strategy_config=strategy_config,
+                    symbol=symbol,
+                    side=side,
+                )
+            except Exception as ownership_err:
+                logger.warning(
+                    "[PositionSync] Strategy %s failed to persist flat-leg ownership block for %s %s: %s",
+                    sid,
+                    symbol,
+                    side,
+                    ownership_err,
+                )
             continue
+        try:
+            _record_flat_leg_ownership_state(
+                strategy_id=sid,
+                strategy_config=strategy_config,
+                symbol=symbol,
+                side=side,
+                strategy_qty=0.0,
+            )
+        except Exception:
+            pass
         _delete_position(sid, symbol, side)
         deleted += 1
 
@@ -736,6 +820,66 @@ class PendingOrderPositionSyncMixin:
                                     qm = float(meta.get("quanto_multiplier") or meta.get("contract_size") or 0.0)
                                     if qm > 0:
                                         qty_base = qty_base * qm
+                                except Exception:
+                                    pass
+
+                    elif isinstance(client, HtxClient) and market_type == "swap":
+                        resp = client.get_positions()
+                        items = resp.get("data") if isinstance(resp, dict) else []
+                        if isinstance(items, list):
+                            for p in items:
+                                if not isinstance(p, dict):
+                                    continue
+                                contract = str(
+                                    p.get("contract_code") or p.get("symbol") or ""
+                                ).strip()
+                                try:
+                                    contracts = abs(
+                                        float(
+                                            p.get("volume")
+                                            or p.get("qty")
+                                            or p.get("position_qty")
+                                            or 0.0
+                                        )
+                                    )
+                                except Exception:
+                                    contracts = 0.0
+                                if not contract or contracts <= 0:
+                                    continue
+                                from app.services.live_trading.position_row_parse import (
+                                    infer_position_side_from_row,
+                                )
+                                side = infer_position_side_from_row(p)
+                                hb_sym = contract.replace("-", "/")
+                                qty_base = contracts
+                                try:
+                                    meta = client.get_contract_info(symbol=hb_sym) or {}
+                                    contract_size = float(
+                                        meta.get("contract_size")
+                                        or meta.get("contractSize")
+                                        or 0.0
+                                    )
+                                    if contract_size > 0:
+                                        qty_base *= contract_size
+                                except Exception:
+                                    pass
+                                exch_size.setdefault(
+                                    hb_sym, {"long": 0.0, "short": 0.0}
+                                )[side] = qty_base
+                                exch_inst_id.setdefault(
+                                    hb_sym, {"long": "", "short": ""}
+                                )[side] = contract
+                                try:
+                                    ep = float(
+                                        p.get("cost_open")
+                                        or p.get("open_price")
+                                        or p.get("avg_price")
+                                        or 0.0
+                                    )
+                                    if ep > 0:
+                                        exch_entry_price.setdefault(
+                                            hb_sym, {"long": 0.0, "short": 0.0}
+                                        )[side] = ep
                                 except Exception:
                                     pass
                                 exch_size.setdefault(hb_sym, {"long": 0.0, "short": 0.0})[side] = float(qty_base)

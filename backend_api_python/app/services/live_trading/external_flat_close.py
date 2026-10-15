@@ -9,9 +9,10 @@ matching ``close_*`` trade so win-rate / trade history stay honest.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from app.services.live_trading.okx import OkxClient
+from app.services.live_trading.exchange_close_history import resolve_exchange_external_close
 from app.services.live_trading.records import (
     _fetch_position,
     apply_fill_to_local_position,
@@ -113,6 +114,43 @@ def _already_recorded_fill(strategy_id: int, exchange_fill_id: str) -> bool:
         exists = cur.fetchone() is not None
         cur.close()
     return bool(exists)
+
+
+def _leg_owner_count(
+    *,
+    strategy_id: int,
+    credential_id: int,
+    market_type: str,
+    symbol: str,
+    side: str,
+) -> int:
+    """Return active local owners for an account leg, including the current strategy."""
+    if int(credential_id or 0) <= 0:
+        return 1
+    sym = normalize_strategy_symbol(symbol) or str(symbol or "").strip()
+    with get_db_connection() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT strategy_id) AS owner_count
+            FROM qd_strategy_positions
+            WHERE credential_id = %s
+              AND market_type = %s
+              AND UPPER(COALESCE(NULLIF(symbol_canonical, ''), symbol)) = UPPER(%s)
+              AND side = %s
+              AND COALESCE(size, 0) > 0
+            """,
+            (
+                int(credential_id),
+                str(market_type or "swap").strip().lower(),
+                sym,
+                str(side or "").strip().lower(),
+            ),
+        )
+        row = cur.fetchone() or {}
+        cur.close()
+    count = int(row.get("owner_count") or 0)
+    return max(1, count) if int(strategy_id or 0) > 0 else count
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -419,55 +457,67 @@ def reconcile_external_flat_closes(
         if isinstance(opened_after, datetime) and opened_after.tzinfo is None:
             opened_after = opened_after.replace(tzinfo=timezone.utc)
 
-    snapshot = resolve_okx_external_close(
+    if _leg_owner_count(
+        strategy_id=sid,
+        credential_id=cred,
+        market_type=mt,
+        symbol=sym,
+        side=side_l,
+    ) > 1:
+        logger.warning(
+            "[ExternalFlatClose] strategy=%s %s %s has multiple local owners; deferring account-level attribution",
+            sid,
+            sym,
+            side_l,
+        )
+        return 0
+
+    snapshot = resolve_exchange_external_close(
         client,
         symbol=sym,
         side=side_l,
-        entry_price=entry,
+        target_qty=residual,
         opened_after=opened_after if isinstance(opened_after, datetime) else None,
+        market_type=mt,
+        is_recorded=lambda fill_id: _already_recorded_fill(sid, fill_id),
     ) or {}
-    close_px = _as_float(snapshot.get("price"))
-    if close_px <= 0:
-        close_px = _as_float(fallback_price)
-    # Never invent close_price == entry_price: that creates fake 0-pnl rows with
-    # pending fees and confuses users. Skip and let a later sync retry.
-    if close_px <= 0:
+    components = snapshot.get("components") if isinstance(snapshot, dict) else None
+    if not isinstance(components, list) or not components:
         logger.warning(
-            "[ExternalFlatClose] strategy=%s %s %s residual=%.8f but no close price available; deferring",
+            "[ExternalFlatClose] strategy=%s %s %s residual=%.8f but no exact close-fill set is available; deferring",
             sid,
             sym,
             side_l,
             residual,
         )
         return 0
-    if entry > 0 and abs(close_px - entry) <= 1e-9 and not snapshot:
-        logger.warning(
-            "[ExternalFlatClose] strategy=%s %s %s refusing entry-price fallback without exchange snapshot",
-            sid,
-            sym,
-            side_l,
+
+    last_trade_id = 0
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        trade_id = record_external_flat_close(
+            strategy_id=sid,
+            symbol=sym,
+            side=side_l,
+            amount=_as_float(component.get("amount")),
+            entry_price=entry,
+            close_price=_as_float(component.get("price")),
+            commission=_as_float(component.get("fee")),
+            commission_ccy=str(component.get("fee_ccy") or "USDT"),
+            close_reason=str(component.get("close_reason") or EXCHANGE_NATIVE_CLOSE),
+            fill_source="position_sync",
+            exchange_fill_id=str(component.get("exchange_fill_id") or ""),
+            credential_id=cred,
+            inst_id=iid,
+            market_type=mt,
+            created_at=(
+                component.get("closed_at")
+                if isinstance(component.get("closed_at"), datetime)
+                else None
+            ),
+            clear_local_position=clear_local_position,
         )
-        return 0
-
-    reason = str(snapshot.get("close_reason") or EXCHANGE_NATIVE_CLOSE)
-    if not snapshot:
-        reason = EXCHANGE_FLAT_RECONCILE
-
-    return record_external_flat_close(
-        strategy_id=sid,
-        symbol=sym,
-        side=side_l,
-        amount=residual,
-        entry_price=entry,
-        close_price=close_px,
-        commission=_as_float(snapshot.get("fee")),
-        commission_ccy=str(snapshot.get("fee_ccy") or "USDT"),
-        close_reason=reason,
-        fill_source="position_sync",
-        exchange_fill_id=str(snapshot.get("exchange_fill_id") or ""),
-        credential_id=cred,
-        inst_id=iid,
-        market_type=mt,
-        created_at=snapshot.get("closed_at") if isinstance(snapshot.get("closed_at"), datetime) else None,
-        clear_local_position=clear_local_position,
-    )
+        if trade_id:
+            last_trade_id = int(trade_id)
+    return last_trade_id
