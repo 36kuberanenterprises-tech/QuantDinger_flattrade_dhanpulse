@@ -34,7 +34,7 @@ from .market_data import load_strategy_frame
 from .runtime import StrategyV2BacktestRunner
 from .readiness import validate_universe_history, validate_warmup, validate_fundamentals
 from .snapshot import MarketDataSnapshotStore, canonical_frame_bytes
-from .storage import StrategyBacktestRepository
+from .storage import StrategyBacktestRepository, compact_backtest_result
 
 
 logger = get_logger(__name__)
@@ -167,8 +167,15 @@ class StrategyV2BacktestService:
         strategy_name: str = "",
         instrument_rules_snapshot_id: str = "",
         analysis_only: bool = False,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[int | None, dict[str, Any]]:
         started_at = perf_counter()
+
+        def emit(phase: str, percent: int, **details: Any) -> None:
+            if on_progress:
+                on_progress({"phase": phase, "percent": percent, **details})
+
+        emit("preparing", 5)
         program = compile_strategy_v2(code)
         manifest = program.manifest
         if end_date <= start_date:
@@ -204,6 +211,12 @@ class StrategyV2BacktestService:
                 fetch_start=fetch_starts[item],
             )
         data_at = perf_counter()
+        emit(
+            "loading_market_data",
+            15,
+            symbols=len(candidates),
+            frequency=frequency,
+        )
         frequency_frames, skipped = self.fetch_frequency_frames(
             candidates,
             manifest.frequencies,
@@ -219,6 +232,13 @@ class StrategyV2BacktestService:
             frames = enricher(frames, candidates)
             frequency_frames[frequency] = frames
             self.validate_fundamental_dependencies(frames, manifest)
+
+        emit(
+            "preparing_simulation",
+            45,
+            symbols=len(frames),
+            marketDataSeconds=round(perf_counter() - data_at, 3),
+        )
 
         available_universe_members = frozenset(frames)
 
@@ -243,6 +263,7 @@ class StrategyV2BacktestService:
             )
 
         replay_at = perf_counter()
+        emit("running_simulation", 52, bars=sum(len(frame.index) for frame in frames.values()))
         runner = StrategyV2BacktestRunner(
             code=code,
             frames=frames,
@@ -258,6 +279,12 @@ class StrategyV2BacktestService:
         )
         result = runner.run(start_date=start_date, end_date=end_date)
         report_at = perf_counter()
+        emit(
+            "building_report",
+            74,
+            simulationSeconds=round(report_at - replay_at, 3),
+            executions=int(result.get("totalExecutions") or 0),
+        )
         if analysis_only:
             execution_count = int(result.get("totalExecutions") or 0)
             closed_count = int(result.get("totalTrades") or 0)
@@ -407,6 +434,7 @@ class StrategyV2BacktestService:
         }
 
         persistence_at = perf_counter()
+        emit("persisting_result", 92, reportSeconds=round(persistence_at - report_at, 3))
         run_id = None
         if persist:
             if self.data_kind != "market":
@@ -439,7 +467,14 @@ class StrategyV2BacktestService:
             "persistence": round(completed_at - persistence_at, 6),
             "total": round(completed_at - started_at, 6),
         })
-        return run_id, result
+        delivery_result = compact_backtest_result(result)
+        emit(
+            "completed",
+            100,
+            runId=run_id,
+            totalSeconds=round(completed_at - started_at, 3),
+        )
+        return run_id, delivery_result
 
     def resolve_candidates(
         self,

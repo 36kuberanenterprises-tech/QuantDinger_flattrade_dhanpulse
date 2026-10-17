@@ -68,3 +68,38 @@ def test_factor_research_forwards_factor_parameters_to_execution_and_storage(app
     assert body["data"]["runId"] == 41
     assert captured["execution"]["factor_params"] == payload["factorParams"]
     assert captured["storage"]["result"]["factorParams"] == payload["factorParams"]
+
+
+def test_human_backtest_submission_uses_persisted_async_job(app, monkeypatch):
+    captured = {}
+
+    def submit_job(**kwargs):
+        captured.update(kwargs)
+        return {
+            "job_id": "job-7",
+            "status": "queued",
+            "kind": "backtest",
+            "created_at": "2026-01-01T00:00:00Z",
+            "billing": {"remaining": 970},
+        }
+
+    monkeypatch.setattr(backtest_center.agent_jobs, "submit_job", submit_job)
+    payload = {
+        "code": "def initialize(context):\n    pass",
+        "startDate": "2026-01-01",
+        "endDate": "2026-02-01",
+        "initialCapital": 20000,
+    }
+
+    with app.test_request_context("/api/backtest/jobs", method="POST", json=payload):
+        g.user_id = 7
+        response, status = inspect.unwrap(backtest_center.create_strategy_backtest_job)()
+
+    body = response.get_json()
+    assert status == 202
+    assert body["data"]["jobId"] == "job-7"
+    assert body["data"]["billing"]["remaining"] == 970
+    assert captured["kind"] == "backtest"
+    assert captured["agent_token_id"] is None
+    assert captured["request_payload"]["__user_id"] == 7
+    assert captured["request_payload"]["initialCapital"] == 20000
