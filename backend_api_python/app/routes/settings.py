@@ -16,6 +16,7 @@ from app.services.settings.branding import build_brand_config
 from app.services.settings.env_file import read_env_file, write_env_file
 from app.utils.redaction import redact_secrets
 from app.services.settings.runtime import reload_runtime_env, refresh_runtime_services
+from app.services.settings.capabilities import get_feature_flags
 
 logger = get_logger(__name__)
 
@@ -47,10 +48,36 @@ STRATEGY_RUNTIME_SETTINGS = {
     'BAR_IDLE_WAKE_INTERVAL_SEC',
 }
 
+TRADING_RUNTIME_SETTINGS = {
+    'ORDER_MODE',
+    'MAKER_WAIT_SEC',
+    'SPOT_CLOSE_SAFETY_RATIO',
+    'SPOT_OPEN_QUOTE_BUFFER',
+    'ALLOW_LOCAL_DESKTOP_BROKERS',
+    'ENABLE_PENDING_ORDER_WORKER',
+    'DISABLE_RESTORE_RUNNING_STRATEGIES',
+}
+
+AGENT_RUNTIME_SETTINGS = {
+    'AGENT_LIVE_TRADING_ENABLED',
+    'QUANTDINGER_DEPLOYMENT_MODE',
+    'AGENT_JOBS_MAX_WORKERS',
+    'ENABLE_REFLECTION_WORKER',
+    'REFLECTION_WORKER_INTERVAL_SEC',
+    'REFLECTION_MIN_AGE_DAYS',
+    'REFLECTION_VALIDATE_LIMIT',
+    'ENABLE_CONFIDENCE_CALIBRATION',
+    'ENABLE_AI_ENSEMBLE',
+    'AI_ENSEMBLE_MODELS',
+    'AI_CALIBRATION_MARKETS',
+    'AI_CALIBRATION_LOOKBACK_DAYS',
+    'AI_CALIBRATION_MIN_SAMPLES',
+}
+
 RESTART_REQUIRED_SETTINGS = {
     'SECRET_KEY',
     'CREDENTIAL_ENCRYPTION_KEY',
-} | STRATEGY_RUNTIME_SETTINGS
+} | STRATEGY_RUNTIME_SETTINGS | TRADING_RUNTIME_SETTINGS | AGENT_RUNTIME_SETTINGS
 
 # ---------------------------------------------------------------
 # ---------------------------------------------------------------
@@ -85,6 +112,7 @@ ADVANCED_KEYS = {
     'TWELVE_DATA_API_KEY', 'ADANOS_API_KEY',
     # Agent gateway (operator-level)
     'AGENT_JOBS_MAX_WORKERS',
+    'QUANTDINGER_DEPLOYMENT_MODE', 'AI_ENSEMBLE_MODELS',
     'ENABLE_PENDING_ORDER_WORKER', 'DISABLE_RESTORE_RUNNING_STRATEGIES',
     # Distributed strategy runtime tuning
     'SHARED_PUBLIC_MARKET_FALLBACK_TTL_SEC',
@@ -124,6 +152,35 @@ ADVANCED_KEYS = {
 }
 
 CONFIG_SCHEMA = {
+
+    'features': {
+        'title': 'settings.group.features',
+        'icon': 'control',
+        'order': -1,
+        'items': [
+            {
+                'key': 'BILLING_ENABLED',
+                'label': 'settings.field.BILLING_ENABLED',
+                'type': 'boolean',
+                'default': 'False',
+                'description': 'settings.desc.BILLING_ENABLED'
+            },
+            {
+                'key': 'MARKETPLACE_ENABLED',
+                'label': 'settings.field.MARKETPLACE_ENABLED',
+                'type': 'boolean',
+                'default': 'False',
+                'description': 'settings.desc.MARKETPLACE_ENABLED'
+            },
+            {
+                'key': 'ENABLE_REGISTRATION',
+                'label': 'settings.field.ENABLE_REGISTRATION',
+                'type': 'boolean',
+                'default': 'True',
+                'description': 'settings.desc.ENABLE_REGISTRATION'
+            },
+        ]
+    },
 
     # Frontend reads these via /api/settings/brand-config (no auth) so logos,
     # social links, version label and legal modals can be rebranded without
@@ -824,7 +881,7 @@ CONFIG_SCHEMA = {
                 'key': 'STRATEGY_MAX_ACTIVE',
                 'label': 'settings.field.STRATEGY_MAX_ACTIVE',
                 'type': 'number',
-                'default': '100000',
+                'default': '3000',
                 'description': 'settings.desc.STRATEGY_MAX_ACTIVE',
             },
             {
@@ -1379,11 +1436,11 @@ CONFIG_SCHEMA = {
                 'label': 'Deployment Mode',
                 'type': 'select',
                 'options': [
-                    {'value': '', 'label': 'Single-tenant / self-hosted'},
+                    {'value': 'self_hosted', 'label': 'Single-tenant / self-hosted'},
                     {'value': 'saas', 'label': 'SaaS / hosted (multi-tenant)'},
                     {'value': 'hosted', 'label': 'Hosted (alias of saas)'},
                 ],
-                'default': '',
+                'default': 'self_hosted',
                 'description': 'Set to "saas" on multi-tenant hosted instances. Users self-manage Agent Tokens in Profile; T scope is allowed with in-app risk disclosure. Live trading still requires AGENT_LIVE_TRADING_ENABLED.'
             },
             {
@@ -1486,13 +1543,6 @@ CONFIG_SCHEMA = {
         'icon': 'safety',
         'order': 10,
         'items': [
-            {
-                'key': 'ENABLE_REGISTRATION',
-                'label': 'Enable Registration',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'Allow new users to register accounts'
-            },
             {
                 'key': 'MFA_ENABLED',
                 'label': 'Enable Authenticator App MFA',
@@ -1691,14 +1741,6 @@ CONFIG_SCHEMA = {
         'icon': 'dollar',
         'order': 11,
         'items': [
-            {
-                'key': 'BILLING_ENABLED',
-                'label': 'Enable Billing',
-                'type': 'boolean',
-                'default': 'False',
-                'description': 'Enable billing system. Users need credits to use certain features'
-            },
-
             # ===== USDT Pay (v3.0.6+: one fixed address per chain + amount-suffix matching) =====
             # Model: each chain has a single receiving address. Orders are
             # disambiguated by a unique amount suffix in the low decimals
@@ -2097,7 +2139,11 @@ def _effective_schema(env_values=None):
     dotenv file because changing them from a running application cannot be
     applied safely or atomically.
     """
-    return _schema_with_advanced_flags()
+    values = env_values if env_values is not None else read_env_file()
+    schema = _schema_with_advanced_flags()
+    if not get_feature_flags(values)['billing_enabled']:
+        schema.pop('billing', None)
+    return schema
 
 
 @settings_blp.route('/schema', methods=['GET'])
@@ -2108,7 +2154,7 @@ def get_settings_schema():
     return jsonify({
         'code': 1,
         'msg': 'success',
-        'data': _effective_schema()
+        'data': _effective_schema(read_env_file())
     })
 
 
@@ -2117,10 +2163,12 @@ def get_settings_schema():
 def get_public_config():
     """Return non-sensitive config values needed by frontend widgets."""
     from app.config.data_sources import CryptoPublicConfig
+    feature_flags = get_feature_flags(read_env_file())
     return jsonify({
         'code': 1,
         'data': {
             'crypto_public_default_exchange': (CryptoPublicConfig.DEFAULT_EXCHANGE or 'binance').lower(),
+            **feature_flags,
         }
     })
 

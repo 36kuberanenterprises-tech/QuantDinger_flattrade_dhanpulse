@@ -49,7 +49,8 @@ class ReflectionService:
 
     def _maybe_run_calibration(self) -> None:
         """Run AI calibration if enabled."""
-        if os.getenv("ENABLE_OFFLINE_AI_CALIBRATION", "true").lower() != "true":
+        from app.services.ai_calibration import confidence_calibration_enabled
+        if not confidence_calibration_enabled():
             return
         try:
             from app.services.ai_calibration import AICalibrationService
@@ -77,8 +78,7 @@ class ReflectionService:
 def start_reflection_worker() -> None:
     """Start background reflection worker (validates + calibrates periodically)."""
     global _reflection_thread
-    # Default to ON to reduce environment-specific configuration needs.
-    if os.getenv("ENABLE_REFLECTION_WORKER", "true").lower() != "true":
+    if os.getenv("ENABLE_REFLECTION_WORKER", "false").lower() != "true":
         logger.info("Reflection worker disabled (ENABLE_REFLECTION_WORKER != true).")
         return
     interval_sec = int(os.getenv("REFLECTION_WORKER_INTERVAL_SEC", "86400"))

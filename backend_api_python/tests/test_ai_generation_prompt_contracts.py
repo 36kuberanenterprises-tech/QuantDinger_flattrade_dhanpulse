@@ -111,6 +111,16 @@ def test_indicator_generation_prompt_uses_notification_safe_signal_contract():
     assert "never infer activation from `text` or `textData`" in INDICATOR_REPAIR_REQUIREMENTS
 
 
+def test_indicator_generation_prompt_uses_native_cloud_contract():
+    assert "`line`, `bar`, `circle`, and `cloud`" in INDICATOR_GENERATION_CONTRACT
+    assert "'upper': number" in INDICATOR_GENERATION_CONTRACT
+    assert "'lower': number" in INDICATOR_GENERATION_CONTRACT
+    assert "Translate Pine `fill()`" in INDICATOR_GENERATION_CONTRACT
+    assert "never emit one `zone` or box layer per bar" in INDICATOR_GENERATION_CONTRACT
+    assert "Preserve valid `cloud` plots" in INDICATOR_REPAIR_REQUIREMENTS
+    assert "replace them with one `cloud` plot" in INDICATOR_REPAIR_REQUIREMENTS
+
+
 def test_indicator_generation_and_repair_prompts_are_english_only():
     prompt_text = INDICATOR_GENERATION_CONTRACT + INDICATOR_REPAIR_REQUIREMENTS
 
@@ -136,6 +146,29 @@ def test_indicator_ide_hidden_prompt_is_english_and_uses_central_contract():
     assert "`locals()` is allowed" not in ai_generate_source
     assert "shift(1, fill_value=False).astype(bool)" in ai_generate_source
     assert "~s.shift(1).fillna(False)" not in ai_generate_source
+    assert "Recognize native `line`, `bar`, `circle`, and `cloud` plots" in ai_generate_source
+
+
+def test_indicator_quality_endpoint_can_skip_runtime_smoke_for_publishing():
+    route_path = Path(__file__).parents[1] / "app" / "routes" / "indicator.py"
+    route_source = route_path.read_text(encoding="utf-8")
+    start = route_source.index("def code_quality_hints():")
+    quality_source = route_source[start:]
+
+    assert 'data.get("runtimeCheck", True) is not False' in quality_source
+    assert "if runtime_check and not has_static_error" in quality_source
+
+
+def test_indicator_publish_enqueues_translation_off_the_request_path():
+    root = Path(__file__).parents[1]
+    route_source = (root / "app" / "routes" / "indicator.py").read_text(encoding="utf-8")
+    celery_source = (root / "app" / "celery_app.py").read_text(encoding="utf-8")
+    task_source = (root / "app" / "tasks" / "indicator_translation.py").read_text(encoding="utf-8")
+
+    assert "translate_indicator_metadata.delay(" in route_source
+    assert '"app.tasks.indicator_translation"' in celery_source
+    assert 'name="quantdinger.tasks.indicator_translation"' in task_source
+    assert "WHERE id = ? AND user_id = ? AND name = ? AND description = ?" in task_source
 
 
 def test_strategy_generator_repairs_invalid_model_output_once(monkeypatch):

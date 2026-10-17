@@ -11,10 +11,17 @@ from app.openapi.blueprint import HumanBlueprint as Blueprint
 from app.utils.auth import login_required
 from app.utils.logger import get_logger
 from app.services.community_service import get_community_service
+from app.services.settings.capabilities import is_marketplace_enabled
 
 logger = get_logger(__name__)
 
 community_blp = Blueprint("community", __name__)
+
+
+@community_blp.before_request
+def require_marketplace_enabled():
+    if not is_marketplace_enabled():
+        return jsonify({'code': 0, 'msg': 'marketplace_disabled'}), 404
 
 
 # ==========================================

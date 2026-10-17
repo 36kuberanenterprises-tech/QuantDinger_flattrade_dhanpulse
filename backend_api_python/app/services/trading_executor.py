@@ -84,7 +84,7 @@ class TradingExecutor:
         self.lock = threading.Lock()
         self.max_active_strategies = max(
             1,
-            int(os.getenv("STRATEGY_MAX_ACTIVE", "100000")),
+            int(os.getenv("STRATEGY_MAX_ACTIVE", "3000")),
         )
         self.evaluator_threads = max(
             1,
@@ -820,6 +820,7 @@ class TradingExecutor:
                 frequency_frames=frequency_frames,
                 initial_capital=initial_capital,
                 params=runtime_params,
+                deployment_risk=trading_config.get("deployment_risk"),
                 universe_resolver=resolve_universe,
                 schedule_timezone=self._load_schedule_timezone(user_id),
             )
@@ -1115,6 +1116,8 @@ class TradingExecutor:
                         if active_prices and positions_prices_fresh
                         else ([], [], "")
                     )
+                    if equity_stop_reason:
+                        persist_cancellations(session.context, order_intent_service)
                     for message in equity_messages:
                         append_strategy_log(strategy_id, "info", message)
                     equity_submission_failed = False

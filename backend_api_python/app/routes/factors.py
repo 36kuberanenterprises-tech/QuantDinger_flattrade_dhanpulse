@@ -30,19 +30,24 @@ def factor_catalog():
         data = list_factor_catalog(
             category=category,
             factor_type=factor_type,
+            include_feature_families=True,
         )
         if provider in ("ta-lib", "talib"):
             data = [item for item in data if item.get("provider") == "ta-lib"]
+        elif provider in ("microsoft-qlib", "qlib"):
+            data = [item for item in data if item.get("provider") == "microsoft-qlib"]
         elif provider:
-            data = [item for item in data if item.get("provider") != "ta-lib"]
+            data = [item for item in data if not item.get("provider")]
         talib_count = sum(1 for item in data if item.get("provider") == "ta-lib")
+        qlib_count = sum(1 for item in data if item.get("provider") == "microsoft-qlib")
         return jsonify({
             "code": 1,
             "msg": "success",
             "data": data,
             "meta": {
-                "builtInCount": len(data) - talib_count,
+                "builtInCount": len(data) - talib_count - qlib_count,
                 "talibCount": talib_count,
+                "qlibCount": qlib_count,
                 "talibAvailable": is_talib_available(),
             },
         })

@@ -133,7 +133,6 @@ class QuickTradeOrderRequestSchema(Schema):
     source = fields.String(load_default="manual", validate=validate.Length(max=64))
     margin_mode = fields.String(load_default="", validate=validate.Length(max=16))
     marginMode = fields.String(load_default="", validate=validate.Length(max=16))
-    ai_decision_filter = fields.Boolean(load_default=False)
     instrument_id = fields.String(load_default="", validate=validate.Length(max=128))
     product_type = fields.String(load_default="", validate=validate.Length(max=64))
     api_family = fields.String(load_default="", validate=validate.Length(max=64))

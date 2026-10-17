@@ -71,7 +71,7 @@ def initialize(context):
     context.subscribe(frequency="4h")
     context.set_metadata(direction_mode="one_way")
     context.set_warmup(310)
-    context.allow_leverage(max_leverage=20)
+    context.allow_leverage(max_leverage=100)
 
 
 def handle_data(context, data):

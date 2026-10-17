@@ -8,6 +8,11 @@ from typing import Any
 import pandas as pd
 
 from .registry import FactorError, compute_factor, get_factor, list_factors
+from .qlib_adapter import (
+    compute_qlib_factor,
+    get_qlib_factor_metadata,
+    list_qlib_factors,
+)
 from .talib_adapter import (
     TalibFactorError,
     compute_talib_factor,
@@ -16,14 +21,25 @@ from .talib_adapter import (
 )
 
 
-def list_factor_catalog(*, category: str = "", factor_type: str = "") -> list[dict[str, Any]]:
+def list_factor_catalog(
+    *,
+    category: str = "",
+    factor_type: str = "",
+    include_feature_families: bool = False,
+) -> list[dict[str, Any]]:
     rows = list_factors(category=category, factor_type=factor_type)
-    if factor_type == "fundamental" or not is_talib_available():
+    if factor_type == "fundamental":
         return rows
-    rows.extend(
-        item for item in list_talib_factors()
-        if not category or item.get("category") == category
-    )
+    if is_talib_available():
+        rows.extend(
+            item for item in list_talib_factors()
+            if not category or item.get("category") == category
+        )
+    if include_feature_families:
+        rows.extend(
+            item for item in list_qlib_factors()
+            if not category or item.get("category") == category
+        )
     return sorted(rows, key=lambda item: (
         str(item.get("factor_type") or ""),
         str(item.get("category") or ""),
@@ -33,6 +49,8 @@ def list_factor_catalog(*, category: str = "", factor_type: str = "") -> list[di
 
 def get_factor_metadata(factor_id: str) -> dict[str, Any]:
     canonical = str(factor_id or "").strip()
+    if canonical.lower().startswith("qlib:"):
+        return get_qlib_factor_metadata(canonical)
     if canonical.lower().startswith("talib:"):
         target = canonical.upper()
         if not is_talib_available():
@@ -53,6 +71,8 @@ def compute_catalog_factor(
     params: Mapping[str, Any] | None = None,
 ) -> float:
     canonical = str(factor_id or "").strip()
+    if canonical.lower().startswith("qlib:"):
+        return compute_qlib_factor(canonical, frame, params)
     if canonical.lower().startswith("talib:"):
         normalized = dict(params or {})
         output = str(normalized.pop("output", "") or "")

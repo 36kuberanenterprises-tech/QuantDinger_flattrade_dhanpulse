@@ -109,6 +109,30 @@ def quick_order_status(
     return "submitted"
 
 
+def quick_trade_protection_status(
+    *,
+    requested: bool,
+    market_type: str,
+    filled_qty: float,
+    avg_price: float,
+    responses: list[Dict[str, Any]],
+    error: str = "",
+) -> tuple[str, str]:
+    """Summarize whether native protection is active for a Quick Trade order."""
+    normalized_error = str(error or "").strip()
+    if normalized_error:
+        return "failed", normalized_error
+    if responses:
+        return "attached", ""
+    if not requested:
+        return "not_requested", ""
+    if str(market_type or "").strip().lower() != "swap":
+        return "unsupported_market", ""
+    if float(filled_qty or 0.0) <= 0 or float(avg_price or 0.0) <= 0:
+        return "pending_fill", ""
+    return "failed", "native_protection_empty_response"
+
+
 def attach_quick_trade_protection(
     client: Any,
     *,

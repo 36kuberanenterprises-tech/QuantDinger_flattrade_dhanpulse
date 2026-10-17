@@ -235,16 +235,26 @@ class StrategyService:
         from app.services.strategy_v2 import get_strategy_v2_deployment_service
 
         changes = self._deployment_payload(payload)
+        existing_config = existing.get("trading_config") or {}
+        existing_risk = existing_config.get("deployment_risk") or {}
         merged = {
-            "sourceId": (existing.get("trading_config") or {}).get("script_source_id"),
+            "sourceId": existing_config.get("script_source_id"),
             "name": existing.get("strategy_name"),
             "initialCapital": existing.get("initial_capital"),
             "executionMode": existing.get("execution_mode"),
             "leverage": existing.get("leverage"),
             "leverageEnabled": float(existing.get("leverage") or 1) > 1,
-            "params": (existing.get("trading_config") or {}).get("params") or {},
-            "directionMode": (existing.get("trading_config") or {}).get("direction_mode") or "",
-            "positionSide": (existing.get("trading_config") or {}).get("position_side") or "",
+            "params": existing_config.get("params") or {},
+            "directionMode": existing_config.get("direction_mode") or "",
+            "positionSide": existing_config.get("position_side") or "",
+            "equityTakeProfitPct": existing_risk.get(
+                "equity_take_profit_pct",
+                existing_config.get("equity_take_profit_pct", 0),
+            ),
+            "equityStopLossPct": existing_risk.get(
+                "equity_stop_loss_pct",
+                existing_config.get("equity_stop_loss_pct", 0),
+            ),
         }
         merged.update({key: value for key, value in changes.items() if value is not None})
         get_strategy_v2_deployment_service().save(
@@ -476,6 +486,7 @@ class StrategyService:
             "sourceId", "name", "initialCapital", "executionMode", "credentialId",
             "leverageEnabled", "leverage", "params", "notificationChannels",
             "notificationTargets", "directionMode", "positionSide", "aiDecisionFilter",
+            "equityTakeProfitPct", "equityStopLossPct",
         }
         unsupported = set(payload) - allowed - {"user_id"}
         if unsupported:

@@ -64,6 +64,7 @@ def list_research_factors():
     rows = list_factor_catalog(
         category=(request.args.get("category") or "").strip(),
         factor_type=(request.args.get("factor_type") or "").strip(),
+        include_feature_families=True,
     )
     return envelope({"items": rows, "talib_available": bool(is_talib_available())})
 

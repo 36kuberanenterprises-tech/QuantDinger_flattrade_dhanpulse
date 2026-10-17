@@ -97,7 +97,7 @@ Return Python source only. Do not use markdown fences or explanatory prose.
 ## Contract leverage
 - Leverage is supported only when every source-controlled instrument is a Crypto perpetual contract ending in `@swap`.
 - A leveraged strategy must explicitly call `context.allow_leverage(max_leverage=N)` in `initialize`.
-- The user may then choose a leverage value from 1 through the declared maximum in backtest or live setup.
+- The user may then choose a leverage value from 1 through the platform maximum of 100 in backtest or live setup; the exchange may enforce a lower instrument or account limit.
 - Never call `allow_leverage` for stocks, ETFs, futures outside the Crypto market, index universes, or Crypto spot.
 - Do not hardcode the user's selected leverage inside order logic; the runtime applies the chosen leverage.
 
@@ -216,13 +216,15 @@ INDICATOR_SYSTEM_CONTRACT = """# QuantDinger chart indicator contract
 - Declare tunable parameters with `# @param <name> <int|float|bool|str> <default> <description>` and read matching defaults through `params.get(...)`.
 - Set `output = {'name': ..., 'plots': [...], 'signals': [...], 'layers': [...]}`.
 - Every plot and signal data list must have exactly `len(df)` values. Use `None` for sparse values and never emit NaN or infinity.
-- Plot types are `line`, `bar`, and `circle`; `histogram`/`column` alias to bar and `lamp`/`dot`/`point`/`scatter` alias to circle. Set `overlay` explicitly. All non-overlay plots from one indicator share one pane.
-- A plot point may be a scalar or `{'value': number, 'color': '#RRGGBB', 'size': number}` for per-bar style. Prefer the canonical `value`, `color`, and `size` keys.
+- Plot types are `line`, `bar`, `circle`, and `cloud`; `histogram`/`column` alias to bar, `lamp`/`dot`/`point`/`scatter` alias to circle, and `band`/`fill_between`/`fill-between` alias to cloud. Set `overlay` explicitly. All non-overlay plots from one indicator share one pane.
+- A line, bar, or circle point may be a scalar or `{'value': number, 'color': '#RRGGBB', 'size': number}` for per-bar style. Prefer the canonical `value`, `color`, and `size` keys.
+- A cloud point must be `None` or `{'upper': number, 'lower': number, 'color': '#RRGGBB'}`. The cloud data list must have `len(df)` entries. Use `None` to break warm-up, neutral, or invalid regions. The renderer orders crossing boundaries automatically. Use `opacity` from `0.02` through `0.30`; use `title=False` when the cloud should not add a legend item.
+- Translate Pine `fill()` between two numeric series to one `cloud` plot. For a continuous per-bar band or trend cloud, never emit one `zone` or box layer per bar.
 - A signal is active when its `data` list contains a finite non-zero numeric marker price for that bar. This finite numeric value format is preferred for consistent preview and notification monitoring. Static `text` or `textData` labels never activate a signal on their own.
 - Signals may set `renderMode` to `events`, `points`, or `state`; prefer sparse numeric event arrays unless the requested visual is explicitly a continuous condition.
 - Signal names are dynamic: use a stable `text` label or a per-bar `textData` label. The `type` field controls marker orientation and does not restrict signal names to Buy, Sell, Long Entry, or Long Exit.
 - Prefer one-bar edge events for markers and notifications. Do not repeat a persistent state on every bar.
-- Layers support `zone`, `line`, and `label`. Do not invent Pine-only fill, table, polyline, candle, background-color, bar-color, object-ID, or mutation contracts.
+- Layers support sparse `zone`, `line`, and `label` annotations. Do not invent Pine-only linefill, table, polyline, candle, background-color, bar-color, object-ID, or mutation contracts.
 - The runtime is single-symbol and single-timeframe. Do not emulate `request.security()`, other `request.*()` APIs, network access, Pine `barstate.*`, or tick rollback.
 - Translate common Pine calculation semantics with pandas/numpy; do not claim Pine syntax/API compatibility or assume a Pine-compatible `ta.*` namespace exists.
 - Avoid look-ahead: no negative shift, future `iloc`, centered rolling, or future-row reads.
@@ -238,7 +240,7 @@ INDICATOR_GENERATION_CONTRACT = INDICATOR_SYSTEM_CONTRACT + """
 - The latest user request overrides prior assistant messages that deferred code generation or asked for another confirmation.
 - The Indicator IDE accepts QuantDinger Python only. If the user mentions Pine or Pine APIs, translate the requested behavior into this native Python contract instead of returning Pine or refusing the request.
 - Preserve useful visual semantics when existing code is supplied.
-- Include concise plots, unambiguous marker labels, and useful tunable parameters.
+- Include concise plots, unambiguous marker labels, and useful tunable parameters. Prefer native plots over repeated layers, keep opacity restrained, and avoid overlapping labels that obscure candles.
 - Interpret user requests written in any language, but use English for identifiers, metadata, comments, `@param` descriptions, and default plot, signal, and layer labels.
 - Localize display labels only when the user explicitly requests a target language. Keep identifiers, comments, metadata, and parameter descriptions in English.
 - `pd` and `np` are preloaded. Do not use `locals()`, `globals()`, reflection, or dynamic execution.
@@ -251,6 +253,8 @@ INDICATOR_REPAIR_REQUIREMENTS = """# Indicator repair requirements
 - Ensure declared parameter defaults exactly match `params.get(...)` fallbacks.
 - Ensure metadata globals, `df = df.copy()`, and `output` exist.
 - Ensure every plot and marker array has exactly `len(df)` values.
+- Preserve valid `cloud` plots. Repair each cloud point to `None` or canonical `upper`/`lower` values with an optional per-point `color`, and keep opacity within `0.02` through `0.30`.
+- When repeated per-bar `zone` or box layers represent two continuous numeric boundaries, replace them with one `cloud` plot and use `None` for intentional gaps.
 - Treat a signal as active only when its `data` array has a finite value at that bar; never infer activation from `text` or `textData`.
 - Convert numpy arrays back to indexed pandas Series before calling pandas-only methods.
 - Use English for identifiers, metadata, comments, parameter descriptions, and default display labels unless the user explicitly requests localized display labels.

@@ -326,10 +326,12 @@ class PendingOrderWorker(
                     ) + protection_result
                     metadata["protected_filled_qty"] = cumulative_filled
                     metadata["native_protection_error"] = ""
+                    metadata["protection_status"] = "attached"
                     metadata_changed = True
             except Exception as exc:
                 protection_error = str(exc)
                 metadata["native_protection_error"] = protection_error
+                metadata["protection_status"] = "failed"
 
         requested_qty = max(0.0, float(metadata.get("requested_base_qty") or 0.0))
         status = quick_order_status(

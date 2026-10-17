@@ -21,6 +21,11 @@ from app.services.factors.catalog import (
     get_factor_metadata,
     list_factor_catalog,
 )
+from app.services.factors.qlib_adapter import (
+    compute_qlib_factor,
+    get_qlib_factor_metadata,
+    list_qlib_factors,
+)
 
 __all__ = [
     "FactorDefinition",
@@ -38,4 +43,7 @@ __all__ = [
     "compute_catalog_factor",
     "get_factor_metadata",
     "list_factor_catalog",
+    "compute_qlib_factor",
+    "get_qlib_factor_metadata",
+    "list_qlib_factors",
 ]
