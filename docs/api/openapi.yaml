@@ -540,9 +540,6 @@ components:
           type: string
           default: ''
           maxLength: 16
-        ai_decision_filter:
-          type: boolean
-          default: false
         instrument_id:
           type: string
           default: ''
@@ -2117,6 +2114,92 @@ paths:
       - Indicator
       operationId: getApiIndicatorKline
       x-visibility: public
+  /api/backtest/jobs:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: postApiBacktestJobs
+      summary: Post Api Backtest Jobs
+      x-visibility: internal
+  /api/backtest/jobs/{job_id}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: getApiBacktestJobsJobId
+      summary: Get Api Backtest Jobs Job Id
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  /api/backtest/jobs/{job_id}/cancel:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - Strategy
+      operationId: postApiBacktestJobsJobIdCancel
+      summary: Post Api Backtest Jobs Job Id Cancel
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      x-visibility: internal
+    parameters:
+    - in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+        minLength: 1
   /api/backtest/run:
     post:
       responses:
@@ -3979,6 +4062,60 @@ paths:
       - Indicator
       operationId: postApiIndicatorChartPreview
       x-visibility: public
+  /api/indicator/preview-image:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Store a generated chart image for an indicator owned by the current
+        user.
+      tags:
+      - Indicator
+      operationId: postApiIndicatorPreviewImage
+      x-visibility: public
+  /api/indicator/preview-images/{filename}:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Serve generated marketplace preview images.
+      tags:
+      - Indicator
+      operationId: getApiIndicatorPreviewImagesFilename
+      parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+      x-visibility: public
+    parameters:
+    - in: path
+      name: filename
+      required: true
+      schema:
+        type: string
+        minLength: 1
   /api/indicator/aiWorkspace/{indicator_id}:
     get:
       responses:
@@ -4103,9 +4240,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/HumanSuccessEnvelope'
       summary: Heuristic hints + runtime smoke-execution for indicator code.
-      description: "Request body:\n    code (required): Indicator source code\n\n\
-        Returns hints with severity, code, and params. Static analysis catches\nstructural\
-        \ issues; a sandboxed dry-run surfaces runtime errors before backtest."
+      description: "Request body:\n    code (required): Indicator source code\n  \
+        \  runtimeCheck (optional): Run the sandboxed smoke execution. Defaults to\
+        \ true.\n\nReturns hints with severity, code, and params. Static analysis\
+        \ catches\nstructural issues; a sandboxed dry-run surfaces runtime errors\
+        \ before backtest."
       tags:
       - Indicator
       operationId: postApiIndicatorCodeQualityHints
@@ -8246,9 +8385,9 @@ paths:
         \                          - leverage = 1: spot market\n                 \
         \         - leverage > 1: swap (perpetual futures) market\nmarket_type   \
         \ (str)    - \"swap\" / \"spot\" (optional, auto-determined by leverage if\
-        \ not provided)\ntp_price       (float)  - take-profit price (optional, for\
-        \ record only)\nsl_price       (float)  - stop-loss price (optional, for record\
-        \ only)\nsource         (str)    - \"ai_radar\" / \"ai_analysis\" / \"indicator\"\
+        \ not provided)\ntp_price       (float)  - exchange-native take-profit price\
+        \ for swaps\nsl_price       (float)  - exchange-native stop-loss price for\
+        \ swaps\nsource         (str)    - \"ai_radar\" / \"ai_analysis\" / \"indicator\"\
         \ / \"manual\""
       tags:
       - QuickTrade
@@ -8280,16 +8419,6 @@ paths:
       - QuickTrade
       operationId: getApiQuickTradeBalance
       x-visibility: private
-      parameters:
-      - name: refresh
-        in: query
-        required: false
-        schema:
-          type: string
-          enum:
-          - '1'
-        description: Read a fresh exchange snapshot after an order instead of the
-          short-lived cache.
   /api/quick-trade/position:
     get:
       responses:
@@ -8311,16 +8440,6 @@ paths:
       - QuickTrade
       operationId: getApiQuickTradePosition
       x-visibility: private
-      parameters:
-      - name: refresh
-        in: query
-        required: false
-        schema:
-          type: string
-          enum:
-          - '1'
-        description: Read a fresh exchange snapshot after an order instead of the
-          short-lived cache.
   /api/quick-trade/close-position:
     post:
       responses:
@@ -8416,66 +8535,6 @@ paths:
       - QuickTrade
       operationId: getApiQuickTradeHistory
       x-visibility: private
-  /api/quick-trade/ai-decisions:
-    get:
-      responses:
-        '400':
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanErrorEnvelope'
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Return account-scoped AI decision audit rows for Quick Trade.
-      tags:
-      - QuickTrade
-      operationId: getApiQuickTradeAiDecisions
-      x-visibility: private
-  /api/quick-trade/event-radar:
-    get:
-      responses:
-        '400':
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanErrorEnvelope'
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Return Event Radar availability and the latest reference analysis.
-      tags:
-      - QuickTrade
-      operationId: getApiQuickTradeEventRadar
-      x-visibility: private
-  /api/quick-trade/event-radar/analyze:
-    post:
-      responses:
-        '400':
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanErrorEnvelope'
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HumanSuccessEnvelope'
-      summary: Run a paid, reference-only event analysis for the current instrument.
-      tags:
-      - QuickTrade
-      operationId: postApiQuickTradeEventRadarAnalyze
-      x-visibility: private
   /api/quick-trade/position-history:
     get:
       responses:
@@ -8542,5 +8601,65 @@ paths:
       - QuickTrade
       operationId: postApiQuickTradePositionProtection
       summary: Post Api Quick Trade Position Protection
+      x-visibility: private
+  /api/quick-trade/ai-decisions:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Return account-scoped AI decision audit rows for Quick Trade.
+      tags:
+      - QuickTrade
+      operationId: getApiQuickTradeAiDecisions
+      x-visibility: private
+  /api/quick-trade/event-radar:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Return Event Radar availability and the latest reference analysis.
+      tags:
+      - QuickTrade
+      operationId: getApiQuickTradeEventRadar
+      x-visibility: private
+  /api/quick-trade/event-radar/analyze:
+    post:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      summary: Run a paid, reference-only event analysis for the current instrument.
+      tags:
+      - QuickTrade
+      operationId: postApiQuickTradeEventRadarAnalyze
       x-visibility: private
 openapi: 3.0.3

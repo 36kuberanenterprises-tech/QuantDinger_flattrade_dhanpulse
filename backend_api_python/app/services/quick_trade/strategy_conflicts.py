@@ -9,10 +9,13 @@ from typing import Any, Dict, Optional
 
 from app.services.live_trading.gate import GateUsdtFuturesClient
 from app.services.live_trading.symbols import to_gate_currency_pair
+from app.utils.logger import get_logger
+from app.utils.request_guard import cache_key, guarded_cached
 
 
 _STRATEGY_CLIENT_ID = re.compile(r"^(?:t-)?qd_(\d+)_", re.IGNORECASE)
 _QUICK_TRADE_CLIENT_ID = re.compile(r"^(?:t-)?qt", re.IGNORECASE)
+logger = get_logger(__name__)
 
 
 def recent_gate_strategy_activity(
@@ -75,3 +78,30 @@ def recent_gate_strategy_activity(
     ):
         return None
     return newest
+
+
+def cached_recent_strategy_activity(
+    client: Any,
+    *,
+    user_id: int,
+    credential_id: int,
+    symbol: str,
+    market_type: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a short-lived strategy conflict snapshot for swap trading."""
+    if str(market_type or "").strip().lower() != "swap":
+        return None
+
+    try:
+        return guarded_cached(
+            cache_key("quick_trade_strategy_conflict", user_id, credential_id, market_type, symbol),
+            lambda: recent_gate_strategy_activity(client, symbol),
+            ttl_sec=12,
+            stale_ttl_sec=30,
+            timeout_sec=6,
+            namespace="quick_trade_strategy_conflict",
+            max_concurrent=4,
+        )
+    except Exception as exc:
+        logger.warning("Quick Trade strategy-conflict check failed: %s", exc)
+        return None

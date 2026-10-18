@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable
 
 from app.services.live_trading.gate import GateUsdtFuturesClient
+from app.services.quick_trade.credentials import build_exchange_config, create_exchange_client
+from app.services.quick_trade.history import parse_quick_trade_metadata
+from app.utils.db import get_db_connection
+from app.utils.logger import get_logger
+from app.utils.request_guard import cache_key, guarded_cached
 from app.services.live_trading.symbols import to_gate_currency_pair
+logger = get_logger(__name__)
+
+
 from app.services.pending_orders.fee_reconciliation import (
     fee_breakdown_to_quote,
     fee_storage_values,
@@ -152,3 +161,99 @@ def quick_trade_fee_updates(
         if update:
             updates[order_id] = update
     return updates
+
+def reconcile_quick_trade_fees(
+    rows: list[Dict[str, Any]],
+    *,
+    user_id: int,
+    credential_id: int,
+    symbol: str,
+    market_type: str,
+) -> None:
+    """Persist authoritative late fee data for visible Quick Trade rows."""
+    if credential_id > 0 and symbol and market_type in ("spot", "swap"):
+        missing_fee_rows = [
+            row for row in rows
+            if str(row.get("exchange_order_id") or "").strip()
+            and float(row.get("filled_amount") or 0) > 0
+            and float(row.get("commission_quote") or 0) <= 0
+            and parse_quick_trade_metadata(row.get("raw_result")).get("fee_status")
+                not in ("actual", "actual_zero")
+        ]
+        if missing_fee_rows:
+            try:
+                config = build_exchange_config(
+                    credential_id,
+                    user_id,
+                    {"market_type": market_type},
+                )
+                client = create_exchange_client(config, market_type=market_type)
+                missing_order_ids = ",".join(
+                    str(row.get("exchange_order_id") or "") for row in missing_fee_rows[:12]
+                )
+                fee_updates = guarded_cached(
+                    cache_key(
+                        "quick_trade_fee_reconciliation",
+                        user_id,
+                        credential_id,
+                        market_type,
+                        symbol,
+                        missing_order_ids,
+                    ),
+                    lambda: quick_trade_fee_updates(
+                        client,
+                        symbol,
+                        market_type,
+                        missing_fee_rows,
+                    ),
+                    ttl_sec=20,
+                    stale_ttl_sec=60,
+                    timeout_sec=8,
+                    namespace="quick_trade_fee_reconciliation",
+                    max_concurrent=4,
+                )
+                if fee_updates:
+                    with get_db_connection() as db:
+                        cur = db.cursor()
+                        for row in missing_fee_rows:
+                            update = fee_updates.get(str(row.get("exchange_order_id") or ""))
+                            if not update or update.get("commission_quote") is None:
+                                continue
+                            stored_raw = row.get("raw_result") or {}
+                            if isinstance(stored_raw, str):
+                                try:
+                                    stored_raw = json.loads(stored_raw) or {}
+                                except Exception:
+                                    stored_raw = {}
+                            if not isinstance(stored_raw, dict):
+                                stored_raw = {"raw": stored_raw}
+                            metadata = stored_raw.get("_quick_trade")
+                            if not isinstance(metadata, dict):
+                                metadata = {}
+                            metadata["fee_status"] = update["fee_status"]
+                            metadata["fees_by_ccy"] = update["fees_by_ccy"]
+                            stored_raw["_quick_trade"] = metadata
+                            cur.execute(
+                                """
+                                UPDATE qd_quick_trades
+                                SET commission = %s,
+                                    commission_ccy = %s,
+                                    commission_quote = %s,
+                                    raw_result = %s
+                                WHERE id = %s AND user_id = %s AND credential_id = %s
+                                """,
+                                (
+                                    update["commission"],
+                                    update["commission_ccy"],
+                                    update["commission_quote"],
+                                    json.dumps(stored_raw, ensure_ascii=False),
+                                    row.get("id"),
+                                    user_id,
+                                    credential_id,
+                                ),
+                            )
+                            row.update(update, raw_result=stored_raw)
+                        db.commit()
+                        cur.close()
+            except Exception as exc:
+                logger.info("Quick Trade fee reconciliation deferred: %s", exc)
