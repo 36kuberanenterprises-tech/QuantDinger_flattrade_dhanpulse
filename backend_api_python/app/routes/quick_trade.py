@@ -71,7 +71,6 @@ from app.services.quick_trade.sizing import (
 )
 from app.services.quick_trade.external_closes import sync_exchange_close_fills as _sync_exchange_close_fills
 from app.services.quick_trade.transport import close_quick_trade_transport, open_quick_trade_transport
-from app.services.ai_decision_filter import list_ai_decisions
 from app.utils.request_guard import RequestGuardError, cache_key, guarded_cached
 
 logger = get_logger(__name__)
@@ -424,11 +423,6 @@ def place_order(body):
                     }), 400
             except Exception as pe:
                 logger.warning("swap margin pre-check skipped: %s", pe)
-
-        from app.routes.quick_trade_ai import maybe_reject_quick_trade
-        ai_rejection = maybe_reject_quick_trade(locals(), _record_quick_trade)
-        if ai_rejection is not None:
-            return ai_rejection
 
         timestamp_suffix = str(int(time.time()))[-6:]  # Last 6 digits of timestamp
         uuid_suffix = uuid.uuid4().hex[:8]  # 8 hex chars
@@ -1969,25 +1963,6 @@ def set_position_protection(body):
     except Exception as exc:
         logger.warning("Quick Trade protection update failed: %s", exc)
         return jsonify({"code": 0, "msg": "quickTrade.workflow.protectionFailed"}), 400
-
-
-@quick_trade_blp.route('/ai-decisions', methods=['GET'])
-@login_required
-def get_ai_decisions():
-    """Return account-scoped AI decision audit rows for Quick Trade."""
-    credential_id = request.args.get("credential_id", type=int) or 0
-    symbol = str(request.args.get("symbol") or "").strip()
-    market_type = str(request.args.get("market_type") or "").strip()
-    limit = request.args.get("limit", type=int) or 100
-    rows = list_ai_decisions(
-        user_id=int(g.user_id),
-        source_type="quick_trade",
-        source_id=credential_id,
-        symbol=symbol,
-        market_type=market_type,
-        limit=limit,
-    )
-    return jsonify({"code": 1, "msg": "common.success", "data": rows})
 
 
 # openapi-compat: legacy import name

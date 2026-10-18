@@ -100,7 +100,6 @@ ADVANCED_KEYS = {
     'ALPHA_VANTAGE_API_KEY', 'ALPHA_VANTAGE_BASE_URL', 'ALPHA_VANTAGE_TIMEOUT', 'ALPHA_VANTAGE_NEWS_LIMIT',
     'AI_CODE_GEN_MODEL', 'LLM_PROXY_URL', 'LLM_USE_SYSTEM_PROXY',
     'JEV_BASE_URL', 'JEV_MODEL', 'JEV_TIMEOUT_SECONDS', 'JEV_MIN_CONFIDENCE', 'AI_DECISION_TIMEOUT_SECONDS',
-    'EVENT_RADAR_JEV_MIN_CONFIDENCE', 'EVENT_RADAR_NEWS_LOOKBACK_DAYS', 'EVENT_RADAR_MAX_EVENTS',
     'SEC_EDGAR_USER_AGENT',
     'OPENAI_BASE_URL', 'DEEPSEEK_BASE_URL', 'GROK_BASE_URL', 'ATLASCLOUD_BASE_URL', 'MINIMAX_BASE_URL',
     # Trading internals
@@ -448,55 +447,6 @@ CONFIG_SCHEMA = {
                 'type': 'number',
                 'default': 0.55,
                 'description': 'settings.desc.JEV_MIN_CONFIDENCE'
-            },
-            {
-                'key': 'EVENT_RADAR_ENABLED',
-                'label': 'settings.field.EVENT_RADAR_ENABLED',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'settings.desc.EVENT_RADAR_ENABLED'
-            },
-            {
-                'key': 'EVENT_RADAR_JEV_MIN_CONFIDENCE',
-                'label': 'settings.field.EVENT_RADAR_JEV_MIN_CONFIDENCE',
-                'type': 'number',
-                'default': 0.65,
-                'description': 'settings.desc.EVENT_RADAR_JEV_MIN_CONFIDENCE'
-            },
-            {
-                'key': 'EVENT_RADAR_NEWS_LOOKBACK_DAYS',
-                'label': 'settings.field.EVENT_RADAR_NEWS_LOOKBACK_DAYS',
-                'type': 'number',
-                'default': 2,
-                'description': 'settings.desc.EVENT_RADAR_NEWS_LOOKBACK_DAYS'
-            },
-            {
-                'key': 'EVENT_RADAR_MAX_EVENTS',
-                'label': 'settings.field.EVENT_RADAR_MAX_EVENTS',
-                'type': 'number',
-                'default': 8,
-                'description': 'settings.desc.EVENT_RADAR_MAX_EVENTS'
-            },
-            {
-                'key': 'EVENT_RADAR_CRYPTO_RSS_ENABLED',
-                'label': 'settings.field.EVENT_RADAR_CRYPTO_RSS_ENABLED',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'settings.desc.EVENT_RADAR_CRYPTO_RSS_ENABLED'
-            },
-            {
-                'key': 'EVENT_RADAR_YAHOO_FINANCE_RSS_ENABLED',
-                'label': 'settings.field.EVENT_RADAR_YAHOO_FINANCE_RSS_ENABLED',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'settings.desc.EVENT_RADAR_YAHOO_FINANCE_RSS_ENABLED'
-            },
-            {
-                'key': 'EVENT_RADAR_SEC_EDGAR_ENABLED',
-                'label': 'settings.field.EVENT_RADAR_SEC_EDGAR_ENABLED',
-                'type': 'boolean',
-                'default': 'True',
-                'description': 'settings.desc.EVENT_RADAR_SEC_EDGAR_ENABLED'
             },
             {
                 'key': 'SEC_EDGAR_USER_AGENT',
@@ -2047,13 +1997,6 @@ CONFIG_SCHEMA = {
                 'type': 'number',
                 'default': '1',
                 'description': 'settings.desc.BILLING_COST_AI_DECISION_FILTER'
-            },
-            {
-                'key': 'BILLING_COST_EVENT_RADAR',
-                'label': 'settings.field.BILLING_COST_EVENT_RADAR',
-                'type': 'number',
-                'default': '5',
-                'description': 'settings.desc.BILLING_COST_EVENT_RADAR'
             },
             {
                 'key': 'MARKETPLACE_PLATFORM_FEE_RATE',

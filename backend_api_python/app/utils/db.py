@@ -299,12 +299,6 @@ def _apply_init_sql(logger, *, strict: bool = False):
             _apply_migration_component(
                 conn,
                 logger,
-                name="event-radar-20260925",
-                path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20260925_event_radar.sql",
-            )
-            _apply_migration_component(
-                conn,
-                logger,
                 name="quick-trade-client-order-id-20260926",
                 path=Path(__file__).resolve().parent.parent.parent / "migrations" / "20260926_quick_trade_client_order_id.sql",
             )
