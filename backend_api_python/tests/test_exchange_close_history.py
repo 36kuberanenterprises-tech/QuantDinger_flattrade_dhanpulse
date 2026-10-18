@@ -9,6 +9,7 @@ from app.services.live_trading.exchange_close_history import resolve_exchange_ex
 from app.services.live_trading.gate import GateUsdtFuturesClient
 from app.services.live_trading.htx import HtxClient
 from app.services.live_trading.okx import OkxClient
+from app.services.alpaca_trading import AlpacaClient
 
 
 OPENED = datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc)
@@ -91,6 +92,14 @@ class _Htx(HtxClient):
         return {"contract_size": "0.001"}
 
 
+class _Alpaca(AlpacaClient):
+    def __init__(self, rows):
+        self.rows = rows
+
+    def get_account_activities(self, **_kwargs):
+        return self.rows
+
+
 def test_binance_combines_exact_partial_close_fills():
     snap = _resolve(
         _Binance(
@@ -114,6 +123,13 @@ def test_close_history_requires_exact_unrecorded_quantity():
     )
     assert _resolve(client, 1.0) is None
     assert _resolve(client, 0.4, recorded={"1"}) is None
+
+
+def test_close_history_treats_recorded_exchange_order_as_duplicate():
+    client = _Binance(
+        [{"id": 1, "orderId": 99, "buyer": False, "positionSide": "LONG", "qty": "0.4", "price": "100", "time": TS1}]
+    )
+    assert _resolve(client, 0.4, recorded={"99"}) is None
 
 
 def test_bybit_uses_closed_size_and_position_lane():
@@ -171,3 +187,32 @@ def test_htx_converts_contract_volume_to_base_quantity():
     )
     assert snap is not None
     assert snap["amount"] == pytest.approx(0.02)
+
+
+def test_alpaca_uses_fill_activities_and_preserves_order_id():
+    client = _Alpaca(
+        [
+            {
+                "id": "fill-a1",
+                "order_id": "order-a1",
+                "symbol": "AAPL",
+                "side": "sell",
+                "qty": "2",
+                "price": "205.5",
+                "transaction_time": datetime(2026, 10, 15, 2, 0, tzinfo=timezone.utc).isoformat(),
+            }
+        ]
+    )
+    snap = resolve_exchange_external_close(
+        client,
+        symbol="AAPL",
+        side="long",
+        target_qty=2.0,
+        opened_after=OPENED,
+        market_type="spot",
+        is_recorded=lambda _value: False,
+    )
+    assert snap is not None
+    assert snap["amount"] == pytest.approx(2.0)
+    assert snap["price"] == pytest.approx(205.5)
+    assert snap["exchange_order_id"] == "order-a1"

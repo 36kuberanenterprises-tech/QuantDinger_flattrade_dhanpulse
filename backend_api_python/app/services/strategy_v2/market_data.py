@@ -232,10 +232,11 @@ def _load_strategy_frame_uncached(
             "after_time": after_time,
             "exchange_id": exchange_id if effective_market == market else None,
             "market_type": market_type if effective_market == market else None,
+            "closed_only": True,
         }
         if rows is not None:
             pass
-        elif effective_market == market and exchange_id:
+        elif effective_market == market and str(exchange_id or "").strip():
             rows, failure = DataSourceFactory.get_kline_with_diagnostics(**kwargs)
             if not rows and failure is not None:
                 raise MarketDataUnavailableError(failure)
@@ -253,13 +254,37 @@ def _load_strategy_frame_uncached(
             market_type or "default",
             exc,
         )
-        return pd.DataFrame()
+        raise MarketDataUnavailableError(
+            classify_market_data_failure(
+                exc,
+                exchange_id=exchange_id or "",
+                market_type=market_type or "",
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+        ) from exc
     if not rows:
-        return pd.DataFrame()
+        raise MarketDataUnavailableError(
+            classify_market_data_failure(
+                "marketData.noRows",
+                exchange_id=exchange_id or "",
+                market_type=market_type or "",
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+        )
     frame = pd.DataFrame(rows)
     time_column = next((name for name in ("time", "timestamp", "datetime", "date") if name in frame.columns), "")
     if not time_column:
-        return pd.DataFrame()
+        raise MarketDataUnavailableError(
+            classify_market_data_failure(
+                "marketData.timestampMissing",
+                exchange_id=exchange_id or "",
+                market_type=market_type or "",
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+        )
     raw_time = frame.pop(time_column)
     numeric = pd.to_numeric(raw_time, errors="coerce")
     if numeric.notna().any():
@@ -272,7 +297,15 @@ def _load_strategy_frame_uncached(
     frame = frame[~frame.index.isna()].sort_index()
     frame.columns = [str(column).strip().lower() for column in frame.columns]
     if any(column not in frame.columns for column in ("open", "high", "low", "close")):
-        return pd.DataFrame()
+        raise MarketDataUnavailableError(
+            classify_market_data_failure(
+                "marketData.ohlcMissing",
+                exchange_id=exchange_id or "",
+                market_type=market_type or "",
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+        )
     for column in ("open", "high", "low", "close", "volume"):
         if column not in frame.columns:
             frame[column] = 0.0

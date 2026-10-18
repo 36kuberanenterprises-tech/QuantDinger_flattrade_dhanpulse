@@ -90,6 +90,11 @@ from app.services.pending_orders.broker_support import (
 )
 from app.services.pending_orders.submission_recovery import SubmissionRecoveryMixin
 from app.services.pending_orders.claims import claim_pending_order
+from app.services.pending_orders.execution_contract import (
+    ExecutionContractError,
+    resolve_queued_execution_contract,
+    validate_persisted_strategy_mode,
+)
 from app.services.live_trading.binance import BinanceFuturesClient
 from app.utils.db import get_db_connection
 from app.services.pending_order_loops import PendingOrderLoops
@@ -188,7 +193,7 @@ class PendingOrderWorker(
         logger.info("PendingOrderWorker stopped")
 
     def _sync_quick_trade_orders(self, limit: int = 50) -> None:
-        """Reconcile non-terminal Quick Trade orders and protect new fills."""
+        """Reconcile Quick Trade fills, protection, and late exchange fees."""
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
@@ -196,7 +201,15 @@ class PendingOrderWorker(
                     """
                     SELECT *
                     FROM qd_quick_trades
-                    WHERE status IN ('submitted', 'partially_filled')
+                    WHERE (
+                            status IN ('submitted', 'partially_filled')
+                            OR (
+                                status = 'filled'
+                                AND COALESCE(filled_amount, 0) > 0
+                                AND COALESCE(commission_quote, 0) <= 0
+                                AND COALESCE(raw_result->'_quick_trade'->>'fee_status', 'pending') = 'pending'
+                            )
+                          )
                       AND (
                             COALESCE(exchange_order_id, '') <> ''
                             OR COALESCE(client_order_id, '') <> ''
@@ -315,14 +328,33 @@ class PendingOrderWorker(
         avg_to_store = cumulative_avg or float(row.get("avg_fill_price") or 0.0)
         fee_to_store = max(float(row.get("commission") or 0.0), float(enrich.get("fee") or 0.0))
         fee_ccy = str(enrich.get("fee_ccy") or row.get("commission_ccy") or "").strip().upper()
-        from app.services.live_trading.fee_quote import fee_to_quote
-        fee_quote = fee_to_quote(
+        from app.services.quick_trade.fee_reconciliation import fee_update_from_fill
+        fee_update = fee_update_from_fill(
             client,
-            symbol=str(row.get("symbol") or ""),
-            fee=fee_to_store,
-            fee_ccy=fee_ccy,
-            fill_price=avg_to_store,
+            str(row.get("symbol") or ""),
+            enrich,
+            fallback_price=avg_to_store,
         )
+        fee_changed = bool(fee_update) and (
+            str(metadata.get("fee_status") or "pending") != str(fee_update.get("fee_status") or "pending")
+            or float(row.get("commission_quote") or 0.0) != float(fee_update.get("commission_quote") or 0.0)
+        )
+        if fee_update:
+            fee_to_store = float(fee_update.get("commission") or 0.0)
+            fee_ccy = str(fee_update.get("commission_ccy") or "")
+            fee_quote = fee_update.get("commission_quote")
+            metadata["fee_status"] = fee_update["fee_status"]
+            metadata["fees_by_ccy"] = fee_update["fees_by_ccy"]
+            stored_raw["_quick_trade"] = metadata
+        else:
+            from app.services.live_trading.fee_quote import fee_to_quote
+            fee_quote = fee_to_quote(
+                client,
+                symbol=str(row.get("symbol") or ""),
+                fee=fee_to_store,
+                fee_ccy=fee_ccy,
+                fill_price=avg_to_store,
+            )
         if fee_quote is None and row.get("commission_quote") is not None:
             fee_quote = float(row.get("commission_quote") or 0.0)
         error_msg = protection_error or str(row.get("error_msg") or "")
@@ -332,6 +364,7 @@ class PendingOrderWorker(
             and status == str(row.get("status") or "")
             and not protection_error
             and not metadata_changed
+            and not fee_changed
         ):
             return
         with get_db_connection() as db:
@@ -348,7 +381,7 @@ class PendingOrderWorker(
                     error_msg = %s,
                     raw_result = %s
                 WHERE id = %s
-                  AND status IN ('submitted', 'partially_filled')
+                  AND status IN ('submitted', 'partially_filled', 'filled')
                 """,
                 (
                     status,
@@ -1392,7 +1425,6 @@ class PendingOrderWorker(
         if intercept_cancelled_dispatch(order_row):
             return
         order_id = int(order_row["id"])
-        mode = (order_row.get("execution_mode") or "signal").strip().lower()
         payload_json = order_row.get("payload_json") or ""
 
         payload: Dict[str, Any] = {}
@@ -1402,9 +1434,20 @@ class PendingOrderWorker(
             except Exception:
                 payload = {}
 
-        signal_type = payload.get("signal_type") or order_row.get("signal_type")
-        symbol = payload.get("symbol") or order_row.get("symbol")
-        strategy_id = payload.get("strategy_id") or order_row.get("strategy_id")
+        try:
+            contract = resolve_queued_execution_contract(order_row, payload)
+            validate_persisted_strategy_mode(contract, load_strategy_configs)
+        except ExecutionContractError as exc:
+            self._mark_failed(order_id=order_id, error=f"execution_contract:{exc.code}")
+            return
+        except Exception:
+            self._mark_failed(order_id=order_id, error="execution_contract:strategy_unavailable")
+            return
+
+        mode = contract.mode
+        signal_type = contract.signal_type
+        symbol = contract.symbol
+        strategy_id = contract.strategy_id
         price = float(payload.get("price") or order_row.get("price") or 0.0)
         amount = float(payload.get("amount") or order_row.get("amount") or 0.0)
         direction = "short" if "short" in str(signal_type) else "long"
@@ -1415,16 +1458,6 @@ class PendingOrderWorker(
             strategy_name = self._load_strategy_name(int(strategy_id or 0)) if strategy_id else ""
         if not strategy_name:
             strategy_name = f"Strategy_{strategy_id}"
-
-        # If the queued record is legacy ("signal") but the strategy is configured as live,
-        # automatically upgrade it to live execution to keep the system moving.
-        try:
-            if mode != "live" and strategy_id:
-                sc = load_strategy_configs(int(strategy_id))
-                if (sc.get("execution_mode") or "").strip().lower() == "live":
-                    mode = "live"
-        except Exception:
-            pass
 
         if mode == "signal":
             from app.services.pending_orders.signal_execution import (

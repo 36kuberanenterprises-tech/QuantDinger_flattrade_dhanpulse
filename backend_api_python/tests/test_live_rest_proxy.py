@@ -90,3 +90,16 @@ def test_funnel_is_single_entrypoint(monkeypatch):
     client._request("POST", "/order", json_body={"x": 1})
     assert calls["method"] == "POST"
     assert calls["proxies"] is not None
+
+
+def test_request_scoped_transport_reuses_connection_without_persisting_auth(monkeypatch):
+    from types import SimpleNamespace
+    calls = _capture_request(monkeypatch)
+    client = BaseRestClient("https://example.com")
+    client._request_session = SimpleNamespace(request=rest_base.requests.request)
+    client._request("POST", "/order", headers={"KEY": "request-only"})
+    assert calls["headers"] == {"KEY": "request-only", "Connection": "keep-alive"}
+    client._request("GET", "/public")
+    assert calls["headers"] == {"Connection": "keep-alive"}
+    BaseRestClient("https://example.com")._request("GET", "/public")
+    assert calls["headers"] == {"Connection": "close"}

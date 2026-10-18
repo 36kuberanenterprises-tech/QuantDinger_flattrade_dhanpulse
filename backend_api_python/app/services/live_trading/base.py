@@ -172,8 +172,10 @@ class BaseRestClient:
         try:
             assert_fd_available("exchange REST")
             request_headers = dict(headers or {})
-            request_headers.setdefault("Connection", "close")
-            with requests.request(
+            session = getattr(self, "_request_session", None)
+            request_headers.setdefault("Connection", "keep-alive" if session is not None else "close")
+            send = session.request if session is not None else requests.request
+            with send(
                     method=str(method or "GET").upper(),
                     url=url,
                     params=params or None,

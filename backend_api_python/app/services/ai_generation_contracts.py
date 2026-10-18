@@ -32,6 +32,7 @@ Return Python source only. Do not use markdown fences or explanatory prose.
 - Use canonical instruments such as `USStock:SPY`, `HKStock:00700.HK`, `CNStock:600519.SH`, `Crypto:BTC/USDT@binance:spot`, `Crypto:AAPL/USD@gate:spot`, `Crypto:00700/HKD@gate:spot`, and a catalog-confirmed exchange equity perpetual such as `Crypto:HK0700/USDT@binance:swap`.
 - Exchange-listed equities keep the `Crypto` market prefix because execution uses the selected exchange credential. Preserve the exact venue, market type, currency, symbol, product type, and API family returned by product search; never rewrite the execution identity as a broker-listed `USStock` or `HKStock` instrument.
 - An explicit venue is part of the instrument identity: `Crypto:SOL/USDT@binance:swap` is also a perpetual contract. Preserve the exchange and market-type suffix exactly.
+- An explicit venue is also a hard market-data route. Never silently replace it with another exchange when history is unavailable. An unqualified `@spot` or `@swap` identifier may use the platform's public research route, but generated live-ready source should preserve the exact catalog-selected venue.
 - For a fixed universe call `context.set_universe([...])`.
 - For a platform universe pool call `context.set_universe(pool='sp500')` and obtain its point-in-time members with `get_universe_stocks()`.
 - For an index universe call `context.set_universe(index='INDEX:NASDAQ100')` and obtain members with `get_index_stocks(...)` when needed.
@@ -47,6 +48,7 @@ Return Python source only. Do not use markdown fences or explanatory prose.
 - Store per-run state on the global `g` namespace.
 - In `handle_data`, use `context.current_dt` to identify the current completed bar by its opening timestamp. In a live scheduled callback it is the scheduler clock instead, so use the returned history index to identify a signal bar. For cooldowns and holding periods, advance a counter on `g` once per distinct completed bar. Never use `len(bars)`, `len(closes)`, or a rolling history window's row offset as a bar clock: the window length stops advancing when full and can permanently block re-entry.
 - Confirm decisions from visible completed data only. Never read future rows, use negative shifts, or otherwise introduce look-ahead bias.
+- Strategy history is already filtered to completed bars by the runtime. Do not manually delete the final row, infer candle closure from wall-clock time, or mix a live tick into the OHLC frame; those workarounds create backtest/live divergence.
 - `initialize` runs during manifest discovery. Use it only for declarations and initial `g` values; never request market data, read live positions, or place orders there.
 - In backtests, scheduled callbacks see previous completed data and may submit for the current open; `handle_data` sees the newly completed bar and its market orders become eligible at the next available bar open. Limit orders and market restrictions may defer or prevent fills. In live sessions, callbacks read the latest completed data and enqueue asynchronous orders; never assume an exact opening-price fill or immediate position update.
 
@@ -90,6 +92,7 @@ Return Python source only. Do not use markdown fences or explanatory prose.
 - A string argument to `get_position` returns a Position even when flat (`amount == 0`); omitted or iterable symbols return a dictionary. For hedged positions, `get_positions()` keys include `::long`/`::short`; read one leg with `get_position(symbol, position_side=...)`.
 - `order` and `order_value` specify changes; `order_target`, `order_target_value`, and `order_target_percent` specify final targets. Quantity APIs use units without an additional leverage multiplier. Value and percent APIs apply the runtime leverage to the requested capital budget or equity fraction; do not multiply leverage into them again. Keep sizing bounded by available capital and explicit allocation rules.
 - An order helper returns an order reference only when the call supplies a non-empty `client_order_id`; otherwise it returns `None` even though an intent was queued. Never use return truthiness as a fill test. Track explicit references with `get_order_status(reference)["status"]`; cancellation can remain `cancel_pending` in live mode.
+- `execution_mode` belongs to the deployment, not strategy source. A queued `signal` intent can never become a live order because the deployment mode changed later; mode changes affect only newly created entry intents. Risk-reducing exits may still complete during a mode transition.
 - Keep long entry, long exit, short entry, and short exit conditions independent. A bearish long exit is not automatically a short entry.
 - Give every order a stable, non-empty `reason` for auditability.
 - Spot and all non-crypto markets are long-only for now.
@@ -186,11 +189,14 @@ SCRIPT_STRATEGY_REPAIR_REQUIREMENTS = """# Strategy API V2 repair requirements
 - Treat `get_position(symbol)` as a `Position` object with direct `.amount`, `.avg_cost`, and `.last_price` attributes; swap code adds `position_side` as a keyword. Never treat it as a dictionary or use `getattr`.
 - Replace legacy `.quantity` and `.cost_basis` position access with `.amount` and `.avg_cost`.
 - Preserve completed-data-only execution and remove look-ahead.
+- Do not remove the final history row as a candle-close workaround; the runtime supplies completed bars and keeps real-time prices outside the strategy OHLC frame.
 - Preserve native multi-timeframe subscriptions when requested: keep every user-requested timeframe, subscribe every used timeframe, let the fastest timeframe drive execution, and never expose a higher-timeframe bar before its close.
 - Never add a new timeframe during repair unless it is explicitly requested or an existing history/factor read already requires it. Keep single-timeframe source single-timeframe.
 - Canonicalize supported literals to `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, or `1w`; weekly is `1w` and monthly is unsupported.
 - Repair undeclared literal reads by adding the matching subscription instead of rewriting every read to the driving timeframe. Do not collapse, resample, or otherwise erase requested higher-timeframe confirmation logic.
 - Keep symbol, market, frequency, schedule, and universe in source code.
+- Preserve an explicit exchange suffix as a hard data route and execution identity. Never repair an unavailable venue by silently substituting another exchange.
+- Keep deployment `execution_mode` out of strategy source. Never make strategy logic depend on converting an already queued signal intent into a live order.
 - Permit user-adjustable leverage only for Crypto `@swap` instruments and only after `context.allow_leverage(max_leverage=N)`.
 - Reject leverage for Crypto spot and every non-Crypto market.
 - `direction_mode` accepts exactly `long_only`, `short_only`, `one_way`, `both`, or `neutral`. Map single-position/net-position long-short reversal requests to `context.set_metadata(direction_mode="one_way")`. Reserve `both` for explicit hedge-mode dual-leg requests.

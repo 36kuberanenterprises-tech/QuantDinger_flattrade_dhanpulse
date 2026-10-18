@@ -306,6 +306,36 @@ class AlpacaClient:
             "commission_type": _enum_value(getattr(order, "commission_type", "")),
         }
 
+    @classmethod
+    def _order_fee_history_snapshot(cls, order: Any) -> Dict[str, Any]:
+        snapshot = cls._order_commission_snapshot(order)
+        commission = abs(float(snapshot.get("commission") or 0.0))
+        currency = str(snapshot.get("commission_ccy") or "").strip().upper()
+        if commission > 0 and currency:
+            return {
+                **snapshot,
+                "commission_quote": commission if currency == "USD" else None,
+                "fees_by_ccy": {currency: commission},
+                "fee_status": "actual",
+            }
+        asset_class = _enum_value(getattr(order, "asset_class", "")).strip().lower()
+        status = _enum_value(getattr(order, "status", "")).strip().lower()
+        if status == "filled" and asset_class in {"us_equity", "equity"}:
+            return {
+                "commission": 0.0,
+                "commission_ccy": "USD",
+                "commission_quote": 0.0,
+                "fees_by_ccy": {"USD": 0.0},
+                "fee_status": "actual_zero",
+            }
+        return {
+            "commission": 0.0,
+            "commission_ccy": "",
+            "commission_quote": None,
+            "fees_by_ccy": {},
+            "fee_status": "pending",
+        }
+
     def place_market_order(
         self,
         symbol: str,
@@ -742,6 +772,7 @@ class AlpacaClient:
                     "created_at": str(getattr(o, "created_at", "") or ""),
                     "extendedHours": bool(getattr(o, "extended_hours", False)),
                     "extended_hours": bool(getattr(o, "extended_hours", False)),
+                    **self._order_fee_history_snapshot(o),
                 }
                 for o in orders
             ]

@@ -96,6 +96,16 @@ def test_strategy_generation_prompt_preserves_native_multi_timeframes():
     assert "Keep single-timeframe source single-timeframe" in SCRIPT_STRATEGY_REPAIR_REQUIREMENTS
 
 
+def test_strategy_generation_prompt_matches_market_and_execution_boundaries():
+    assert "hard market-data route" in SCRIPT_STRATEGY_SYSTEM_PROMPT
+    assert "Never silently replace it with another exchange" in SCRIPT_STRATEGY_SYSTEM_PROMPT
+    assert "already filtered to completed bars" in SCRIPT_STRATEGY_SYSTEM_PROMPT
+    assert "queued `signal` intent can never become a live order" in SCRIPT_STRATEGY_SYSTEM_PROMPT
+    assert "Risk-reducing exits may still complete" in SCRIPT_STRATEGY_SYSTEM_PROMPT
+    assert "hard data route and execution identity" in SCRIPT_STRATEGY_REPAIR_REQUIREMENTS
+    assert "Keep deployment `execution_mode` out of strategy source" in SCRIPT_STRATEGY_REPAIR_REQUIREMENTS
+
+
 def test_indicator_prompt_remains_chart_only():
     assert "chart indicator is visual analysis code only" in INDICATOR_SYSTEM_CONTRACT
     assert "must not open, close, size, backtest, or live trade" in INDICATOR_SYSTEM_CONTRACT

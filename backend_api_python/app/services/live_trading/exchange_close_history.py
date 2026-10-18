@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from app.services.live_trading.binance import BinanceFuturesClient
@@ -14,6 +14,7 @@ from app.services.live_trading.bybit import BybitClient
 from app.services.live_trading.gate import GateSpotClient, GateUsdtFuturesClient
 from app.services.live_trading.htx import HtxClient
 from app.services.live_trading.okx import OkxClient
+from app.services.alpaca_trading import AlpacaClient
 from app.services.live_trading.symbols import (
     to_bitget_um_symbol,
     to_gate_currency_pair,
@@ -41,6 +42,12 @@ def _number(value: Any, default: float = 0.0) -> float:
 def _timestamp(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
     try:
         raw = float(value)
     except Exception:
@@ -98,6 +105,8 @@ def _fill(
     fee_ccy: Any = "",
     closed_at: Any,
     reason: str = EXCHANGE_NATIVE_CLOSE,
+    exchange_order_id: Any = "",
+    client_order_id: Any = "",
 ) -> Optional[Dict[str, Any]]:
     fid = str(fill_id or "").strip()
     amount = abs(_number(qty))
@@ -113,6 +122,8 @@ def _fill(
         "fee_ccy": str(fee_ccy or ""),
         "closed_at": closed,
         "close_reason": str(reason or EXCHANGE_NATIVE_CLOSE),
+        "exchange_order_id": str(exchange_order_id or "").strip(),
+        "client_order_id": str(client_order_id or "").strip(),
     }
 
 
@@ -136,6 +147,8 @@ def _binance_rows(client: Any, symbol: str, side: str) -> List[Dict[str, Any]]:
             fee=row.get("commission"),
             fee_ccy=row.get("commissionAsset"),
             closed_at=row.get("time"),
+            exchange_order_id=row.get("orderId") or row.get("order_id"),
+            client_order_id=row.get("clientOrderId") or row.get("client_order_id"),
         )
         if item:
             output.append(item)
@@ -165,6 +178,8 @@ def _bybit_rows(client: BybitClient, symbol: str, side: str) -> List[Dict[str, A
             fee=row.get("execFee"),
             fee_ccy=row.get("feeCurrency") or "USDT",
             closed_at=row.get("execTime"),
+            exchange_order_id=row.get("orderId") or row.get("order_id"),
+            client_order_id=row.get("orderLinkId") or row.get("clientOrderId"),
         )
         if item:
             output.append(item)
@@ -204,6 +219,8 @@ def _bitget_rows(client: Any, symbol: str, side: str, market_type: str) -> List[
             fee=fee,
             fee_ccy=fee_ccy,
             closed_at=row.get("cTime") or row.get("uTime") or row.get("createdTime"),
+            exchange_order_id=row.get("orderId") or row.get("order_id"),
+            client_order_id=row.get("clientOid") or row.get("clientOrderId"),
         )
         if item:
             output.append(item)
@@ -248,6 +265,8 @@ def _gate_rows(client: Any, symbol: str, side: str) -> List[Dict[str, Any]]:
             fee=row.get("fee"),
             fee_ccy=row.get("fee_currency") or "USDT",
             closed_at=row.get("create_time_ms") or row.get("time_ms") or row.get("create_time") or row.get("time"),
+            exchange_order_id=row.get("order_id") or row.get("orderId"),
+            client_order_id=row.get("text") or row.get("client_order_id"),
         )
         if item:
             output.append(item)
@@ -285,6 +304,8 @@ def _okx_rows(client: OkxClient, symbol: str, side: str, market_type: str) -> Li
             fee=row.get("fee"),
             fee_ccy=row.get("feeCcy") or "USDT",
             closed_at=row.get("ts"),
+            exchange_order_id=row.get("ordId") or row.get("orderId"),
+            client_order_id=row.get("clOrdId") or row.get("algoClOrdId"),
         )
         if item:
             output.append(item)
@@ -364,6 +385,47 @@ def _htx_rows(client: HtxClient, symbol: str, side: str, market_type: str) -> Li
             fee=row.get("trade_fee") or row.get("filled-fees") or row.get("fee"),
             fee_ccy=row.get("fee-currency") or row.get("fee_asset") or "USDT",
             closed_at=row.get("created_at") or row.get("created-at") or row.get("ts"),
+            exchange_order_id=row.get("order_id") or row.get("order-id") or row.get("orderId"),
+            client_order_id=row.get("client_order_id") or row.get("client-order-id"),
+        )
+        if item:
+            output.append(item)
+    return output
+
+
+def _alpaca_rows(
+    client: AlpacaClient,
+    symbol: str,
+    side: str,
+    opened_after: Optional[datetime],
+) -> List[Dict[str, Any]]:
+    after = opened_after or (datetime.now(timezone.utc) - timedelta(days=30))
+    if after.tzinfo is None:
+        after = after.replace(tzinfo=timezone.utc)
+    rows = client.get_account_activities(
+        activity_types=["FILL"],
+        after=after.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        page_size=100,
+        max_pages=5,
+    )
+    wanted_symbol = str(symbol or "").replace("/", "").replace("-", "").upper()
+    wanted_side = "sell" if side == "long" else "buy"
+    output: List[Dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        row_symbol = str(row.get("symbol") or "").replace("/", "").replace("-", "").upper()
+        if row_symbol != wanted_symbol or str(row.get("side") or "").lower() != wanted_side:
+            continue
+        item = _fill(
+            fill_id=row.get("id") or row.get("activity_id") or row.get("execution_id"),
+            qty=row.get("qty") or row.get("quantity"),
+            price=row.get("price") or row.get("avg_price"),
+            fee=0.0,
+            fee_ccy="USD",
+            closed_at=row.get("transaction_time") or row.get("executed_at") or row.get("at"),
+            exchange_order_id=row.get("order_id"),
+            client_order_id=row.get("client_order_id"),
         )
         if item:
             output.append(item)
@@ -384,7 +446,13 @@ def _select_exact_close(
     for row in rows:
         closed = row.get("closed_at")
         fill_id = str(row.get("exchange_fill_id") or "")
-        if not isinstance(closed, datetime) or (opened and closed < opened) or is_recorded(fill_id):
+        order_id = str(row.get("exchange_order_id") or "")
+        if (
+            not isinstance(closed, datetime)
+            or (opened and closed < opened)
+            or is_recorded(fill_id)
+            or (order_id and is_recorded(order_id))
+        ):
             continue
         candidates.append(dict(row))
     candidates.sort(key=lambda item: item["closed_at"])
@@ -397,6 +465,8 @@ def _select_exact_close(
         return None
     selected = candidates
     weighted = sum(_number(row.get("amount")) * _number(row.get("price")) for row in selected)
+    order_ids = list(dict.fromkeys(str(row.get("exchange_order_id") or "") for row in selected if row.get("exchange_order_id")))
+    client_ids = list(dict.fromkeys(str(row.get("client_order_id") or "") for row in selected if row.get("client_order_id")))
     return {
         "amount": total,
         "price": weighted / total if total > 0 else 0.0,
@@ -406,6 +476,8 @@ def _select_exact_close(
         "close_reason": selected[-1].get("close_reason") or EXCHANGE_NATIVE_CLOSE,
         "source": "fills_history",
         "components": selected,
+        "exchange_order_id": order_ids[0] if len(order_ids) == 1 else "",
+        "client_order_id": client_ids[0] if len(client_ids) == 1 else "",
     }
 
 
@@ -422,7 +494,9 @@ def resolve_exchange_external_close(
     """Return an exact, idempotent set of close fills for one flat account leg."""
     mt = "spot" if str(market_type or "").lower() == "spot" else "swap"
     try:
-        if isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
+        if isinstance(client, AlpacaClient):
+            rows = _alpaca_rows(client, symbol, side, opened_after)
+        elif isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
             rows = _binance_rows(client, symbol, side)
         elif isinstance(client, BybitClient):
             rows = _bybit_rows(client, symbol, side)

@@ -157,6 +157,8 @@ class QuickTradeOrderRequestSchema(Schema):
 
 
 class QuickTradeCloseRequestSchema(Schema):
+    order_type = fields.String(load_default="market", validate=validate.OneOf(("market", "limit")))
+    price = fields.Float(load_default=0, validate=validate.Range(min=0))
     credential_id = fields.Integer(required=True, validate=validate.Range(min=1))
     symbol = fields.String(required=True, validate=validate.Length(min=1, max=64))
     market_type = fields.String(
@@ -191,6 +193,16 @@ class QuickTradeCloseRequestSchema(Schema):
 
 class QuickTradeCancelRequestSchema(Schema):
     trade_id = fields.Integer(required=True, validate=validate.Range(min=1))
+
+
+class QuickTradeProtectionRequestSchema(Schema):
+    credential_id = fields.Integer(required=True, validate=validate.Range(min=1))
+    symbol = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    position_side = fields.String(required=True, validate=validate.OneOf(("long", "short")))
+    action = fields.String(load_default="create", validate=validate.OneOf(("create", "cancel")))
+    kind = fields.String(load_default="tp", validate=validate.OneOf(("tp", "sl")))
+    price = fields.Float(load_default=0, validate=validate.Range(min=0))
+    order_id = fields.String(load_default="", validate=validate.Length(max=64))
 
 
 class UserInfoSchema(Schema):

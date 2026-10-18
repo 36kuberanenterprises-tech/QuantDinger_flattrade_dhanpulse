@@ -1,5 +1,6 @@
 import inspect
 from contextlib import contextmanager
+from datetime import datetime
 
 from flask import Flask, g
 
@@ -45,8 +46,10 @@ class _Cursor:
                     "is_close": True,
                     "close_side": "long",
                     "close_scope": "full",
+                    "entry_price": 74000,
                 }
             },
+            "created_at": datetime(2026, 10, 18, 3, 35),
         }]
 
     def close(self):
@@ -122,6 +125,7 @@ def test_history_filters_by_account_symbol_and_market(monkeypatch):
         yield _Db(cursor)
 
     monkeypatch.setattr(quick_trade, "get_db_connection", fake_connection)
+    monkeypatch.setattr(quick_trade, "_sync_exchange_close_fills", lambda **kwargs: 0)
     app = Flask(__name__)
     handler = inspect.unwrap(quick_trade.get_history)
 
@@ -143,7 +147,9 @@ def test_history_filters_by_account_symbol_and_market(monkeypatch):
     assert payload["data"]["trades"][0]["client_order_id"] == "qd-quick-7"
     assert payload["data"]["trades"][0]["is_close"] is True
     assert payload["data"]["trades"][0]["close_side"] == "long"
+    assert payload["data"]["trades"][0]["entry_price"] == 74000
     assert payload["data"]["trades"][0]["realized_pnl"] == 12.5
+    assert payload["data"]["trades"][0]["created_at"] == "2026-10-18T03:35:00Z"
 
 
 def test_ai_decision_history_is_scoped_to_selected_account(monkeypatch):

@@ -566,6 +566,16 @@ components:
     QuickTradeCloseRequest:
       type: object
       properties:
+        order_type:
+          type: string
+          default: market
+          enum:
+          - market
+          - limit
+        price:
+          type: number
+          default: 0.0
+          minimum: 0.0
         credential_id:
           type: integer
           minimum: 1
@@ -640,6 +650,46 @@ components:
           minimum: 1
       required:
       - trade_id
+      additionalProperties: false
+    QuickTradeProtectionRequest:
+      type: object
+      properties:
+        credential_id:
+          type: integer
+          minimum: 1
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 64
+        position_side:
+          type: string
+          enum:
+          - long
+          - short
+        action:
+          type: string
+          default: create
+          enum:
+          - create
+          - cancel
+        kind:
+          type: string
+          default: tp
+          enum:
+          - tp
+          - sl
+        price:
+          type: number
+          default: 0.0
+          minimum: 0.0
+        order_id:
+          type: string
+          default: ''
+          maxLength: 64
+      required:
+      - credential_id
+      - position_side
+      - symbol
       additionalProperties: false
   responses:
     DEFAULT_ERROR:
@@ -8230,6 +8280,16 @@ paths:
       - QuickTrade
       operationId: getApiQuickTradeBalance
       x-visibility: private
+      parameters:
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - '1'
+        description: Read a fresh exchange snapshot after an order instead of the
+          short-lived cache.
   /api/quick-trade/position:
     get:
       responses:
@@ -8251,6 +8311,16 @@ paths:
       - QuickTrade
       operationId: getApiQuickTradePosition
       x-visibility: private
+      parameters:
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - '1'
+        description: Read a fresh exchange snapshot after an order instead of the
+          short-lived cache.
   /api/quick-trade/close-position:
     post:
       responses:
@@ -8405,5 +8475,72 @@ paths:
       tags:
       - QuickTrade
       operationId: postApiQuickTradeEventRadarAnalyze
+      x-visibility: private
+  /api/quick-trade/position-history:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - QuickTrade
+      operationId: getApiQuickTradePositionHistory
+      summary: Get Api Quick Trade Position History
+      x-visibility: private
+  /api/quick-trade/position-protection:
+    get:
+      responses:
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      tags:
+      - QuickTrade
+      operationId: getApiQuickTradePositionProtection
+      summary: Get Api Quick Trade Position Protection
+      x-visibility: private
+    post:
+      responses:
+        '422':
+          $ref: '#/components/responses/UNPROCESSABLE_ENTITY'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanErrorEnvelope'
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HumanSuccessEnvelope'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuickTradeProtectionRequest'
+      tags:
+      - QuickTrade
+      operationId: postApiQuickTradePositionProtection
+      summary: Post Api Quick Trade Position Protection
       x-visibility: private
 openapi: 3.0.3
