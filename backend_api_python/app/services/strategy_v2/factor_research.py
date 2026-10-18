@@ -13,6 +13,7 @@ from app.services.factors import (
     compute_catalog_factor,
     compute_panel_factor,
     compute_talib_indicator,
+    factor_warmup_bars,
     get_factor,
     get_factor_metadata,
 )
@@ -50,6 +51,16 @@ class FactorResearchEngine:
 
     @classmethod
     def warmup_bars(cls, factor_id: str, params: Mapping[str, Any] | None = None) -> int:
+        cleaned = str(factor_id or "").strip().lower()
+        if cleaned.startswith("momentum_") or cleaned.startswith("volatility_"):
+            return cls._suffix_number(cleaned, 20) + 1
+        if cleaned in {"reversal", "reversal_5"}:
+            return 6
+        if not cleaned.startswith(("qlib:", "talib:")):
+            try:
+                return factor_warmup_bars(cleaned, params)
+            except FactorError:
+                pass
         try:
             metadata = get_factor_metadata(factor_id)
         except ValueError:

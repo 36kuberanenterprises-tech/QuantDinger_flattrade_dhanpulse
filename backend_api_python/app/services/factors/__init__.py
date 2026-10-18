@@ -5,6 +5,7 @@ from app.services.factors.registry import (
     FactorError,
     compute_factor,
     compute_panel_factor,
+    factor_warmup_bars,
     get_factor,
     list_factors,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "FactorError",
     "compute_factor",
     "compute_panel_factor",
+    "factor_warmup_bars",
     "get_factor",
     "list_factors",
     "TalibFactorError",
