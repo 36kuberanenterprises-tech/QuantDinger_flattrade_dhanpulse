@@ -23,12 +23,11 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.services.analysis_memory import get_analysis_memory, AnalysisMemory
-from app.services.market_data_collector import MarketDataCollector
 
 
 logger = get_logger(__name__)

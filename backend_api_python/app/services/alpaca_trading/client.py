@@ -17,7 +17,7 @@ from uuid import UUID
 import requests
 
 from app.utils.logger import get_logger
-from app.services.alpaca_trading.symbols import normalize_symbol, format_display_symbol, parse_symbol
+from app.services.alpaca_trading.symbols import parse_symbol
 
 logger = get_logger(__name__)
 

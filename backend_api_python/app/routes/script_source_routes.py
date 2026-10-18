@@ -221,7 +221,6 @@ def compile_script_source_v2():
 @login_required
 def delete_script_source():
     try:
-        payload = _source_payload()
         source_id = int(request.args.get("id") or 0)
         if not source_id:
             return jsonify({"code": 0, "msg": "source id is required", "data": None}), 400

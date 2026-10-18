@@ -542,8 +542,6 @@ class PendingOrderPositionSyncMixin:
 
                 # Get strategy's trading symbol(s) to filter positions
                 # Only sync positions for symbols that this strategy actually trades
-                allowed_symbols = strategy_allowed_symbols(sc)
-
                 # Lazy import IBKR / Alpaca clients here so the elif chain
                 # below can rely on isinstance() checks without paying the import
                 # cost on systems that don't ship those broker libs.
@@ -655,7 +653,6 @@ class PendingOrderPositionSyncMixin:
                             # Fatal auth/config errors should auto-stop the strategy to avoid endless spam.
                             # Typical OKX response: HTTP 401 {"msg":"Invalid OK-ACCESS-KEY","code":"50111"}
                             msg = str(e)
-                            m = msg.lower()
                             if is_file_descriptor_exhausted(e):
                                 set_exchange_sync_backoff(cache_key, seconds=_position_sync_fd_backoff_sec())
                                 _activate_position_sync_fd_backoff(msg)

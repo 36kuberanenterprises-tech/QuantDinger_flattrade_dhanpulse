@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from app.services.exchange_execution import resolve_exchange_config
 from app.services.live_trading.factory import create_client

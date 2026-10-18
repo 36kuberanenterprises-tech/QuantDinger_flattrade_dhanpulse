@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from app.services.llm import LLMService
 from app.services.strategy import StrategyService

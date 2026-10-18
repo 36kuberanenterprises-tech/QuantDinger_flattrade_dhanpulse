@@ -17,7 +17,6 @@ from app.services.factors import (
     TalibFactorError,
     compute_catalog_factor,
     compute_factor,
-    compute_talib_factor,
     compute_talib_indicator,
     get_factor,
     is_talib_available,

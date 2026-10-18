@@ -17,7 +17,7 @@ import hashlib
 import hmac
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN, ROUND_UP
+from decimal import Decimal, ROUND_DOWN
 from typing import Any, Dict, Optional, Tuple, Union
 from urllib.parse import urlencode
 

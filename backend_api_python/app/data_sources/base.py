@@ -5,7 +5,7 @@ All market data adapters should normalize K-line rows to the shape defined here.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.utils.logger import get_logger
 

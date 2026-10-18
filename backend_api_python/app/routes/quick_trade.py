@@ -32,7 +32,11 @@ from app.openapi.schemas.high_risk import (
 from app.utils.db import get_db_connection
 from app.utils.logger import get_logger
 from app.utils.auth import login_required
-from app.services.quick_trade.balances import empty_balance_dict, fetch_balance_raw, parse_balance as _parse_balance
+from app.services.quick_trade.balances import (
+    empty_balance_dict,
+    fetch_balance_raw,
+    parse_balance as _parse_balance,  # noqa: F401 - compatibility export
+)
 from app.services.quick_trade.credentials import build_exchange_config, create_exchange_client
 from app.services.quick_trade.errors import (
     exchange_error_user_message,
@@ -52,7 +56,6 @@ from app.services.quick_trade.products import (
     build_product_aware_config as _build_product_aware_config,
 )
 from app.services.quick_trade.positions import (
-    extract_signed_position_qty as _extract_signed_position_qty,
     infer_position_side_from_row as _infer_position_side_from_row,
     normalize_okx_positions_raw as _normalize_okx_positions_raw,
     parse_positions as _parse_positions,
@@ -1069,7 +1072,6 @@ def _fetch_exchange_positions_raw(
     from app.services.live_trading.symbols import (
         to_bybit_symbol,
         to_gate_currency_pair,
-        to_okx_spot_inst_id,
         to_okx_swap_inst_id,
     )
 

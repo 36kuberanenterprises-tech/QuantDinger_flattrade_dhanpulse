@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import re
 import time
-import traceback
 from typing import Any, Dict, List
 from flask import Response, g, jsonify, request, send_from_directory
 from app.openapi.blueprint import HumanBlueprint as Blueprint
@@ -44,7 +43,6 @@ from app.services.indicator_versions import (
     restore_version as restore_indicator_code_version,
 )
 from app.utils.auth import login_required
-from app.services.indicator_params import IndicatorParamsParser
 from app.services.indicator_validation import (
     generate_mock_df,
     indicator_debug_summary,
@@ -55,7 +53,6 @@ from app.services.indicator_preview_storage import (
     preview_image_root,
     save_indicator_preview,
 )
-import requests
 
 logger = get_logger(__name__)
 

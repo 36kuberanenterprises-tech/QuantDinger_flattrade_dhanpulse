@@ -7,7 +7,6 @@ and optionally triggers AI calibration.
 """
 import os
 import threading
-import time
 from typing import Dict, Any, Optional
 
 from app.utils.logger import get_logger

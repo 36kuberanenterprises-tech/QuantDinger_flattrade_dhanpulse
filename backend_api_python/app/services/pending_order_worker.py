@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from app.services.strategy_runtime.cancellations import dispatch_requested_cancel
 import os
-import re
 import threading
 import time
 from dataclasses import replace
@@ -20,23 +19,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.services.signal_notifier import SignalNotifier
 from app.services.instrument_rules import get_instrument_rules_provider
 from app.services.exchange_execution import load_strategy_configs, resolve_exchange_config, safe_exchange_config_for_log
-from app.services.live_trading.execution import place_order_from_signal
 from app.services.live_trading.factory import create_client
 from app.services.live_trading.records import (
     ensure_position_ledger_schema,
-    normalize_strategy_symbol,
-    strategy_allowed_symbols,
 )
 from app.services.live_trading.account_configuration import (
     requires_derivatives_account_configuration,
     resolve_derivatives_margin_mode,
-)
-from app.services.live_trading.strategy_position_sync import (
-    strategy_uses_fill_ledger,
-)
-from app.services.live_trading.account_positions import (
-    account_legs_from_exchange_maps,
-    sync_account_positions,
 )
 from app.services.live_trading.adapters import LiveOrderPhaseAdapter
 from app.services.live_trading.contracts import OrderIntent
@@ -48,9 +37,8 @@ from app.services.live_trading.executors import (
 from app.services.live_trading.leg_context import credential_id_from_exchange_config
 from app.services.live_trading.position_query import resolve_reduce_only_quantity
 from app.services.live_trading.position_ownership import supports_position_coexistence
-from app.utils.pnl import calc_notional_value
 from app.utils.numeric_precision import format_decimal
-from app.services.live_trading.base import LiveTradingError, is_file_descriptor_exhausted
+from app.services.live_trading.base import LiveTradingError
 from app.services.pending_orders.fill_records import (
     persist_strategy_fill, proportional_spot_position_fill_quantity,
     trade_close_reason_from_payload,
@@ -82,19 +70,9 @@ from app.services.pending_orders.live_order_phases import (
 )
 from app.services.pending_orders.entry_position_guard import (
     evaluate_entry_position_guard,
-    strategy_allows_simultaneous_legs as _strategy_allows_simultaneous_legs,
+    strategy_allows_simultaneous_legs as _strategy_allows_simultaneous_legs,  # noqa: F401 - compatibility export
 )
 from app.services.grid.exchange_orders import query_grid_order_fill
-from app.services.pending_orders.position_sync_cache import (
-    exchange_sync_backoff_sec,
-    get_position_sync_snapshot,
-    invalidate_position_sync_snapshot_for_exchange,
-    is_exchange_rate_limit_error,
-    is_exchange_sync_backoff,
-    position_sync_cache_key,
-    set_exchange_sync_backoff,
-    set_position_sync_snapshot,
-)
 from app.services.pending_order_position_sync import PendingOrderPositionSyncMixin
 from app.services.pending_orders.sent_order_recovery import (
     is_final_fill, normalize_live_order_status,
@@ -113,13 +91,6 @@ from app.services.pending_orders.broker_support import (
 from app.services.pending_orders.submission_recovery import SubmissionRecoveryMixin
 from app.services.pending_orders.claims import claim_pending_order
 from app.services.live_trading.binance import BinanceFuturesClient
-from app.services.live_trading.binance_spot import BinanceSpotClient
-from app.services.live_trading.okx import OkxClient
-from app.services.live_trading.bitget import BitgetMixClient
-from app.services.live_trading.bitget_spot import BitgetSpotClient
-from app.services.live_trading.bybit import BybitClient
-from app.services.live_trading.gate import GateSpotClient, GateUsdtFuturesClient
-from app.services.live_trading.htx import HtxClient
 from app.utils.db import get_db_connection
 from app.services.pending_order_loops import PendingOrderLoops
 from app.utils.logger import get_logger
@@ -127,7 +98,6 @@ from app.utils.strategy_runtime_logs import append_strategy_log
 from app.services.strategy_lifecycle import (
     auto_stop_live_strategy,
     is_fatal_exchange_error,
-    should_skip_position_sync,
 )
 
 # Lazy import IBKR to avoid ImportError if ib_insync not installed

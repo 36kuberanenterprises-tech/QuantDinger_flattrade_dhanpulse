@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from .frequencies import normalize_frequency
+from .frequencies import normalize_frequency  # noqa: F401 - public compatibility export
 from .models import InstrumentSpec
 
 

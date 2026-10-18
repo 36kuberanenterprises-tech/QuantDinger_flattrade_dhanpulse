@@ -3,7 +3,6 @@ K-line (OHLCV) API routes.
 """
 from flask import jsonify, request
 from app.openapi.blueprint import HumanBlueprint as Blueprint
-from datetime import datetime
 import traceback
 
 from app.services.kline import KlineService

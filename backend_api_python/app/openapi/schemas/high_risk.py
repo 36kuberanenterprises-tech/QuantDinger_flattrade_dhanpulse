@@ -80,11 +80,6 @@ class CredentialCreateRequestSchema(Schema):
             raise ValidationError("secret_key is required", field_name="secret_key")
 
 
-class CredentialRenameRequestSchema(Schema):
-    id = fields.Integer(required=True, validate=validate.Range(min=1))
-    name = fields.String(required=True, validate=validate.Length(max=128))
-
-
 class BillingOrderRequestSchema(Schema):
     plan = fields.String(
         required=True,
@@ -217,16 +212,6 @@ class LoginResponseSchema(Schema):
     code = fields.Integer(required=True)
     msg = fields.String(required=True)
     data = fields.Nested(LoginDataSchema, allow_none=True)
-
-
-class StrategyStatusDataSchema(Schema):
-    status = fields.String(allow_none=True)
-
-
-class StrategyStatusResponseSchema(Schema):
-    code = fields.Integer(required=True)
-    msg = fields.String(required=True)
-    data = fields.Nested(StrategyStatusDataSchema, allow_none=True)
 
 
 class CredentialCreatedDataSchema(Schema):

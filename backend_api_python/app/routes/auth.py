@@ -1042,10 +1042,7 @@ def oauth_google_callback():
     
     try:
         from app.services.oauth_service import get_oauth_service
-        from app.services.security_service import get_security_service
-        
         oauth = get_oauth_service()
-        security = get_security_service()
         
         code = request.args.get('code')
         state = request.args.get('state')
@@ -1141,10 +1138,7 @@ def oauth_github_callback():
     
     try:
         from app.services.oauth_service import get_oauth_service
-        from app.services.security_service import get_security_service
-        
         oauth = get_oauth_service()
-        security = get_security_service()
         
         code = request.args.get('code')
         state = request.args.get('state')

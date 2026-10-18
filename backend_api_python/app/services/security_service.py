@@ -6,7 +6,7 @@ import json
 import hashlib
 import requests
 from datetime import datetime, timedelta
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Dict, Any
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from app.config.settings import Config
 from app.utils.db import get_db_connection
