@@ -1,1 +1,175 @@
-"""Quick Trade quote-to-base sizing helpers."""\n\nfrom __future__ import annotations\n\nfrom app.utils.logger import get_logger\n\n\nlogger = get_logger(__name__)\n\n\ndef resolve_order_notional_usdt(amount_usdt: float, leverage: int, market_type: str) -> float:\n    """Translate the page input into quote notional using one consistent contract."""\n    amount = max(0.0, float(amount_usdt or 0.0))\n    if str(market_type or "").strip().lower() == "swap":\n        return amount * max(1, int(leverage or 1))\n    return amount\n\n\ndef convert_usdt_to_base_qty(client, symbol: str, usdt_amount: float, market_type: str, limit_price: float = 0.0) -> float:\n    """\n    Convert USDT amount to base asset quantity for all exchanges.\n\n    This is a unified function that works for all exchanges.\n    For spot: converts USDT -> base qty (e.g., 100 USDT -> 0.033 ETH)\n    For swap: converts USDT -> base qty (e.g., 100 USDT -> 0.033 ETH), which will then be converted to contracts\n\n    Args:\n        client: Exchange client instance\n        symbol: Trading pair (e.g., "ETH/USDT")\n        usdt_amount: USDT amount to convert\n        market_type: "spot" or "swap"\n        limit_price: For limit orders, use this price if provided (optional)\n\n    Returns:\n        Base asset quantity\n    """\n    if usdt_amount <= 0:\n        return usdt_amount\n\n    try:\n        # Try to get current price from exchange\n        current_price = 0.0\n\n        # For limit orders, use the provided price\n        if limit_price > 0:\n            current_price = limit_price\n            logger.info(f"Using limit price {limit_price} for USDT conversion")\n        else:\n            # Try to get current market price from exchange\n            if hasattr(client, "get_ticker"):\n                try:\n                    ticker = client.get_ticker(symbol=symbol)\n                    if isinstance(ticker, dict):\n                        for _pk in ("last", "lastPr", "lastPx", "lastPrice", "close", "price"):\n                            try:\n                                current_price = float(ticker.get(_pk) or 0)\n                            except Exception:\n                                current_price = 0.0\n                            if current_price > 0:\n                                break\n                except Exception:\n                    current_price = 0.0\n\n            # OKX\n            from app.services.live_trading.okx import OkxClient\n            if current_price <= 0 and isinstance(client, OkxClient):\n                try:\n                    from app.services.live_trading.symbols import to_okx_spot_inst_id, to_okx_swap_inst_id\n                    inst_id = to_okx_spot_inst_id(symbol) if market_type == "spot" else to_okx_swap_inst_id(symbol)\n                    logger.debug(f"OKX: Getting ticker for inst_id={inst_id}, symbol={symbol}, market_type={market_type}")\n                    ticker = client.get_ticker(inst_id=inst_id)\n                    if ticker:\n                        current_price = float(ticker.get("last") or ticker.get("lastPx") or 0)\n                        logger.debug(f"OKX: Got price {current_price} from ticker")\n                    else:\n                        logger.warning(f"OKX: get_ticker returned empty result for inst_id={inst_id}")\n                except AttributeError as e:\n                    logger.error(f"OKX: get_ticker method not found: {e}")\n                    raise\n                except Exception as e:\n                    logger.error(f"OKX: Failed to get ticker: {e}")\n                    raise\n\n            # Binance - try to get price from public API\n            from app.services.live_trading.binance import BinanceFuturesClient\n            from app.services.live_trading.binance_spot import BinanceSpotClient\n            if current_price <= 0 and isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):\n                try:\n                    # Binance public ticker endpoint\n                    base_url = getattr(client, "base_url", "")\n                    if "binance" in base_url.lower():\n                        import requests\n                        if isinstance(client, BinanceFuturesClient):\n                            ticker_url = f"{base_url}/fapi/v1/ticker/price"\n                        else:\n                            ticker_url = f"{base_url}/api/v3/ticker/price"\n                        from app.services.live_trading.symbols import to_binance_futures_symbol\n                        # Binance spot and futures use the same symbol format\n                        sym = to_binance_futures_symbol(symbol)\n                        resp = requests.get(ticker_url, params={"symbol": sym}, timeout=5)\n                        if resp.status_code == 200:\n                            data = resp.json()\n                            if isinstance(data, dict):\n                                current_price = float(data.get("price") or 0)\n                except Exception:\n                    pass\n\n            # Bybit v5 - same host as trading API; tickers/orderbook are public.\n            from app.services.live_trading.bybit import BybitClient\n            if current_price <= 0 and isinstance(client, BybitClient):\n                try:\n                    import requests\n                    from app.services.live_trading.symbols import to_bybit_symbol\n\n                    bu = (getattr(client, "base_url", "") or "").rstrip("/")\n                    bsym = to_bybit_symbol(symbol).upper()\n                    cat = "spot" if (market_type or "").strip().lower() == "spot" else "linear"\n                    if bu and bsym:\n                        tr = requests.get(\n                            f"{bu}/v5/market/tickers",\n                            params={"category": cat, "symbol": bsym},\n                            timeout=8,\n                        )\n                        if tr.status_code == 200:\n                            jd = tr.json() if tr.text else {}\n                            lst = (((jd.get("result") or {}).get("list")) or []) if isinstance(jd, dict) else []\n                            if lst and isinstance(lst[0], dict):\n                                t0 = lst[0]\n                                current_price = float(\n                                    str(\n                                        t0.get("lastPrice")\n                                        or t0.get("markPrice")\n                                        or t0.get("indexPrice")\n                                        or 0\n                                    ).replace(",", "")\n                                    or 0\n                                )\n                        if current_price <= 0:\n                            obr = requests.get(\n                                f"{bu}/v5/market/orderbook",\n                                params={"category": cat, "symbol": bsym, "limit": 25},\n                                timeout=8,\n                            )\n                            if obr.status_code == 200:\n                                od = obr.json() if obr.text else {}\n                                res = (od.get("result") or {}) if isinstance(od, dict) else {}\n                                bids = res.get("b") or []\n                                asks = res.get("a") or []\n                                bp = float(str(bids[0][0]).replace(",", "")) if bids and bids[0] else 0.0\n                                ap = float(str(asks[0][0]).replace(",", "")) if asks and asks[0] else 0.0\n                                if bp > 0 and ap > 0:\n                                    current_price = (bp + ap) / 2.0\n                                else:\n                                    current_price = bp or ap\n                except Exception:\n                    pass\n\n            # Other exchanges - can be added as needed\n            # For exchanges without price API, we'll use a fallback\n\n        if current_price > 0:\n            base_qty = usdt_amount / current_price\n            logger.info(f"Converted USDT amount {usdt_amount} to base qty {base_qty:.8f} using price {current_price} for {symbol}")\n            return base_qty\n        else:\n            # Can't get price - this is critical for quick trade\n            # Quick trade always expects USDT input, so we must convert\n            logger.error(f"CRITICAL: Could not get price for {symbol} on {type(client).__name__} to convert USDT amount {usdt_amount}")\n            logger.error(f"This will cause order to fail. Please check exchange API connectivity or symbol format.")\n            # Still return original amount as fallback, but log error\n            return usdt_amount\n\n    except Exception as e:\n        logger.warning(f"Failed to convert USDT amount to base qty: {e}, using original amount")\n        return usdt_amount\n\n
+"""Quick Trade quote-to-base sizing helpers."""
+
+from __future__ import annotations
+
+from app.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
+
+
+def resolve_order_notional_usdt(amount_usdt: float, leverage: int, market_type: str) -> float:
+    """Translate the page input into quote notional using one consistent contract."""
+    amount = max(0.0, float(amount_usdt or 0.0))
+    if str(market_type or "").strip().lower() == "swap":
+        return amount * max(1, int(leverage or 1))
+    return amount
+
+
+def convert_usdt_to_base_qty(client, symbol: str, usdt_amount: float, market_type: str, limit_price: float = 0.0) -> float:
+    """
+    Convert USDT amount to base asset quantity for all exchanges.
+
+    This is a unified function that works for all exchanges.
+    For spot: converts USDT -> base qty (e.g., 100 USDT -> 0.033 ETH)
+    For swap: converts USDT -> base qty (e.g., 100 USDT -> 0.033 ETH), which will then be converted to contracts
+
+    Args:
+        client: Exchange client instance
+        symbol: Trading pair (e.g., "ETH/USDT")
+        usdt_amount: USDT amount to convert
+        market_type: "spot" or "swap"
+        limit_price: For limit orders, use this price if provided (optional)
+
+    Returns:
+        Base asset quantity
+    """
+    if usdt_amount <= 0:
+        return usdt_amount
+
+    try:
+        # Try to get current price from exchange
+        current_price = 0.0
+
+        # For limit orders, use the provided price
+        if limit_price > 0:
+            current_price = limit_price
+            logger.info(f"Using limit price {limit_price} for USDT conversion")
+        else:
+            # Try to get current market price from exchange
+            if hasattr(client, "get_ticker"):
+                try:
+                    ticker = client.get_ticker(symbol=symbol)
+                    if isinstance(ticker, dict):
+                        for _pk in ("last", "lastPr", "lastPx", "lastPrice", "close", "price"):
+                            try:
+                                current_price = float(ticker.get(_pk) or 0)
+                            except Exception:
+                                current_price = 0.0
+                            if current_price > 0:
+                                break
+                except Exception:
+                    current_price = 0.0
+
+            # OKX
+            from app.services.live_trading.okx import OkxClient
+            if current_price <= 0 and isinstance(client, OkxClient):
+                try:
+                    from app.services.live_trading.symbols import to_okx_spot_inst_id, to_okx_swap_inst_id
+                    inst_id = to_okx_spot_inst_id(symbol) if market_type == "spot" else to_okx_swap_inst_id(symbol)
+                    logger.debug(f"OKX: Getting ticker for inst_id={inst_id}, symbol={symbol}, market_type={market_type}")
+                    ticker = client.get_ticker(inst_id=inst_id)
+                    if ticker:
+                        current_price = float(ticker.get("last") or ticker.get("lastPx") or 0)
+                        logger.debug(f"OKX: Got price {current_price} from ticker")
+                    else:
+                        logger.warning(f"OKX: get_ticker returned empty result for inst_id={inst_id}")
+                except AttributeError as e:
+                    logger.error(f"OKX: get_ticker method not found: {e}")
+                    raise
+                except Exception as e:
+                    logger.error(f"OKX: Failed to get ticker: {e}")
+                    raise
+
+            # Binance - try to get price from public API
+            from app.services.live_trading.binance import BinanceFuturesClient
+            from app.services.live_trading.binance_spot import BinanceSpotClient
+            if current_price <= 0 and isinstance(client, (BinanceFuturesClient, BinanceSpotClient)):
+                try:
+                    # Binance public ticker endpoint
+                    base_url = getattr(client, "base_url", "")
+                    if "binance" in base_url.lower():
+                        import requests
+                        if isinstance(client, BinanceFuturesClient):
+                            ticker_url = f"{base_url}/fapi/v1/ticker/price"
+                        else:
+                            ticker_url = f"{base_url}/api/v3/ticker/price"
+                        from app.services.live_trading.symbols import to_binance_futures_symbol
+                        # Binance spot and futures use the same symbol format
+                        sym = to_binance_futures_symbol(symbol)
+                        resp = requests.get(ticker_url, params={"symbol": sym}, timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if isinstance(data, dict):
+                                current_price = float(data.get("price") or 0)
+                except Exception:
+                    pass
+
+            # Bybit v5 - same host as trading API; tickers/orderbook are public.
+            from app.services.live_trading.bybit import BybitClient
+            if current_price <= 0 and isinstance(client, BybitClient):
+                try:
+                    import requests
+                    from app.services.live_trading.symbols import to_bybit_symbol
+
+                    bu = (getattr(client, "base_url", "") or "").rstrip("/")
+                    bsym = to_bybit_symbol(symbol).upper()
+                    cat = "spot" if (market_type or "").strip().lower() == "spot" else "linear"
+                    if bu and bsym:
+                        tr = requests.get(
+                            f"{bu}/v5/market/tickers",
+                            params={"category": cat, "symbol": bsym},
+                            timeout=8,
+                        )
+                        if tr.status_code == 200:
+                            jd = tr.json() if tr.text else {}
+                            lst = (((jd.get("result") or {}).get("list")) or []) if isinstance(jd, dict) else []
+                            if lst and isinstance(lst[0], dict):
+                                t0 = lst[0]
+                                current_price = float(
+                                    str(
+                                        t0.get("lastPrice")
+                                        or t0.get("markPrice")
+                                        or t0.get("indexPrice")
+                                        or 0
+                                    ).replace(",", "")
+                                    or 0
+                                )
+                        if current_price <= 0:
+                            obr = requests.get(
+                                f"{bu}/v5/market/orderbook",
+                                params={"category": cat, "symbol": bsym, "limit": 25},
+                                timeout=8,
+                            )
+                            if obr.status_code == 200:
+                                od = obr.json() if obr.text else {}
+                                res = (od.get("result") or {}) if isinstance(od, dict) else {}
+                                bids = res.get("b") or []
+                                asks = res.get("a") or []
+                                bp = float(str(bids[0][0]).replace(",", "")) if bids and bids[0] else 0.0
+                                ap = float(str(asks[0][0]).replace(",", "")) if asks and asks[0] else 0.0
+                                if bp > 0 and ap > 0:
+                                    current_price = (bp + ap) / 2.0
+                                else:
+                                    current_price = bp or ap
+                except Exception:
+                    pass
+
+            # Other exchanges - can be added as needed
+            # For exchanges without price API, we'll use a fallback
+
+        if current_price > 0:
+            base_qty = usdt_amount / current_price
+            logger.info(f"Converted USDT amount {usdt_amount} to base qty {base_qty:.8f} using price {current_price} for {symbol}")
+            return base_qty
+        else:
+            # Can't get price - this is critical for quick trade
+            # Quick trade always expects USDT input, so we must convert
+            logger.error(f"CRITICAL: Could not get price for {symbol} on {type(client).__name__} to convert USDT amount {usdt_amount}")
+            logger.error(f"This will cause order to fail. Please check exchange API connectivity or symbol format.")
+            # Still return original amount as fallback, but log error
+            return usdt_amount
+
+    except Exception as e:
+        logger.warning(f"Failed to convert USDT amount to base qty: {e}, using original amount")
+        return usdt_amount
