@@ -331,3 +331,53 @@ def test_factor_research_sizes_groups_from_usable_factor_cross_section():
 
     assert result["effectiveGroups"] == 2
     assert result["sampleDiagnostics"]["medianCrossSectionSize"] == 4
+
+
+def test_factor_research_warmup_bars_handles_shorthand_and_custom_multistage_factors():
+    index = pd.date_range("2025-01-01", periods=200, freq="B")
+    step = pd.Series(range(len(index)), index=index, dtype=float)
+    frames = {}
+    for offset, symbol in enumerate(["A", "B", "C"]):
+        close = 100.0 + step * (0.15 + offset * 0.01) + ((step + offset) % 11)
+        frames[symbol] = pd.DataFrame({
+            "open": close - 0.3,
+            "high": close + 1.2,
+            "low": close - 1.1,
+            "close": close,
+            "volume": 1000.0 + step * 3.0 + offset * 100.0,
+        }, index=index)
+    engine = FactorResearchEngine()
+
+    cases = [
+        ("momentum_20", None, 21),
+        ("momentum_60", None, 61),
+        ("volatility_45", None, 46),
+        ("reversal", None, 6),
+        ("reversal_5", None, 6),
+        ("tema", {"period": 50}, 150),
+        ("trix", {"period": 30}, 91),
+        ("dema", {"period": 50}, 100),
+        ("adx", {"period": 30}, 60),
+        ("zlema", {"period": 40}, 59),
+        ("hma", {"period": 100}, 110),
+        ("kama", {"period": 20}, 21),
+        ("ema_slope", {"slope_period": 15}, 35),
+        ("macd", {"signal_period": 20}, 46),
+        ("stochastic", {"smooth_k": 10, "smooth_d": 10}, 32),
+        ("tsi", {"fast_period": 20}, 46),
+        ("keltner_channels", {"atr_period": 30}, 30),
+    ]
+    for factor_id, params, expected_warmup in cases:
+        warmup = FactorResearchEngine.warmup_bars(factor_id, params)
+        assert warmup == expected_warmup, factor_id
+        sliced_frames = {symbol: frame.iloc[:warmup] for symbol, frame in frames.items()}
+        sliced_close = engine._panel(sliced_frames, "close")
+        timestamp = sliced_close.index[-1]
+        panel = engine._factor_panel(
+            sliced_frames,
+            factor_id,
+            sliced_close,
+            params,
+            [timestamp],
+        )
+        assert panel.loc[timestamp].notna().all(), factor_id
