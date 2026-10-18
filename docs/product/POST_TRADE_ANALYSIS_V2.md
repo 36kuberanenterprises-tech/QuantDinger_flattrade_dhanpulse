@@ -1,4 +1,4 @@
-# Strategy review V2 / 策略复盘 V2
+# Strategy post-trade analysis V2 / 策略复盘 V2
 
 ## Boundary / 功能边界
 

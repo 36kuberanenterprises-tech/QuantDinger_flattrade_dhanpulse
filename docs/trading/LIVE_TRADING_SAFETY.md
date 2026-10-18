@@ -51,7 +51,7 @@ If any condition is ambiguous, the ledger remains intact and the ownership block
 
 ## Optional JEV System One entry filter
 
-JEV is a System One model: it evaluates prepared state and typed questions into structured decisions instead of generating free-form text. Regular strategies and Quick Trade can use it before submitting entry orders. The result is reduced to an auditable `PASS` or `REJECT`; exits, stop loss, take profit, and emergency risk reduction bypass the filter. If JEV is unavailable, QuantDinger falls back to the configured LLM. If neither provider is available, the order proceeds and the unavailable provider is recorded so AI failure does not disable trading.
+JEV is a System One model: it evaluates prepared state and typed questions into structured decisions instead of generating free-form text. Regular live strategies can use it before submitting entry orders. Quick Trade uses deterministic validation and explicit user confirmation without the AI decision filter. Strategy filter results are reduced to an auditable `PASS` or `REJECT`; exits, stop loss, take profit, and emergency risk reduction bypass the filter. If JEV is unavailable, QuantDinger falls back to the configured LLM. If neither provider is available, the order proceeds and the unavailable provider is recorded so AI failure does not disable trading.
 
 ## Incident response
 
