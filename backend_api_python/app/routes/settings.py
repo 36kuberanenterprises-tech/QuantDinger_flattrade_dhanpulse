@@ -1650,10 +1650,10 @@ CONFIG_SCHEMA = {
             },
             {
                 'key': 'VERIFICATION_CODE_IP_HOURLY_LIMIT',
-                'label': 'Verification Code IP Hourly Limit',
+                'label': 'settings.field.VERIFICATION_CODE_IP_HOURLY_LIMIT',
                 'type': 'number',
                 'default': '10',
-                'description': 'Maximum verification codes one IP may request per hour.'
+                'description': 'settings.desc.VERIFICATION_CODE_IP_HOURLY_LIMIT'
             },
             {
                 'key': 'VERIFICATION_CODE_MAX_ATTEMPTS',

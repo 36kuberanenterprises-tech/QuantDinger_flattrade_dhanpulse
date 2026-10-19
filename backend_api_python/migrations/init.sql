@@ -311,6 +311,8 @@ CREATE TABLE IF NOT EXISTS qd_security_logs (
 CREATE INDEX IF NOT EXISTS idx_security_logs_user_id ON qd_security_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_security_logs_action ON qd_security_logs(action);
 CREATE INDEX IF NOT EXISTS idx_security_logs_created_at ON qd_security_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_security_logs_action_ip_created_at
+    ON qd_security_logs(action, ip_address, created_at);
 
 -- =============================================================================
 -- 1.10. User MFA (TOTP / Authenticator App)

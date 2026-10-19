@@ -421,6 +421,14 @@ def login_with_code():
             # Check if registration is enabled
             if os.getenv('ENABLE_REGISTRATION', 'true').lower() != 'true':
                 return jsonify({'code': 0, 'msg': 'User not found and registration is disabled', 'data': None}), 403
+
+            can_register, registration_msg = security.reserve_registration_slot(
+                ip_address=ip_address,
+                user_agent=user_agent,
+                email=email,
+            )
+            if not can_register:
+                return jsonify({'code': 0, 'msg': registration_msg, 'data': None}), 429
             
             # Auto-create user with email as username
             import re
@@ -770,6 +778,14 @@ def register(data):
         existing_email = user_service.get_user_by_email(email)
         if existing_email:
             return jsonify({'code': 0, 'msg': 'Email already registered', 'data': None}), 400
+
+        can_register, registration_msg = security.reserve_registration_slot(
+            ip_address=ip_address,
+            user_agent=user_agent,
+            email=email,
+        )
+        if not can_register:
+            return jsonify({'code': 0, 'msg': registration_msg, 'data': None}), 429
         
         # Validate referral code (user ID)
         referred_by = None
