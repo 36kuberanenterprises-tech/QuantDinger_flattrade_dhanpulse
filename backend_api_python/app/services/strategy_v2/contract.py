@@ -30,7 +30,11 @@ from .instruments import (
     normalize_pool_reference,
     parse_instrument,
 )
-from .frequencies import FREQUENCY_SECONDS, unique_frequencies
+from .frequencies import (
+    FREQUENCY_SECONDS,
+    SUPPORTED_SUBSCRIPTION_FREQUENCIES,
+    unique_frequencies,
+)
 from .models import (
     InstrumentSpec,
     ScheduleSpec,
@@ -306,7 +310,7 @@ def compile_strategy_v2(code: str) -> CompiledStrategyV2:
     unsupported = [
         item
         for item in frequencies
-        if item not in FREQUENCY_SECONDS
+        if item not in SUPPORTED_SUBSCRIPTION_FREQUENCIES
     ]
     if unsupported:
         raise StrategyV2ContractError(

@@ -1011,6 +1011,7 @@ class IndicatorSignalAlertService:
             "4h": 300,
             "1d": 600,
             "1w": 1800,
+            "1mo": 3600,
         }
         return mapping.get(tf, 120)
 

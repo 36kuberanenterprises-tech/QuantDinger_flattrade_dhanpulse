@@ -47,6 +47,7 @@ TIMEFRAME_SECONDS = {
     "4h": 14400,
     "1d": 86400,
     "1w": 604800,
+    "1mo": 2592000,
 }
 
 PROVIDER_TIMEFRAMES = {
@@ -54,6 +55,7 @@ PROVIDER_TIMEFRAMES = {
     "4h": "4H",
     "1d": "1D",
     "1w": "1W",
+    "1mo": "1M",
 }
 
 
