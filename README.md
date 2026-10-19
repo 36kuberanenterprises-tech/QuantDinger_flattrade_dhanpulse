@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://github.com/OpenByteInc/QuantDinger">
-    <img src="docs/screenshots/logo.jpg" alt="QuantDinger logo" width="180" height="180">
+    <img src="docs/screenshots/logo.png" alt="QuantDinger logo" width="420">
   </a>
 
   <h1>QuantDinger</h1>
