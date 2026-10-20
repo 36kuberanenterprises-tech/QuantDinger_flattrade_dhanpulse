@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-BASE_URL = "https://piconnect.flattrade.in/PiConnectTP/"
+BASE_URL = "https://piconnect.flattrade.in/PiConnectAPI/"
 
 
 class FlattradeError(RuntimeError):
